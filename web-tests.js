@@ -22,8 +22,29 @@ require(deps, function(require) {
   test('policy encode/decode', _ => {
     return policyOrder.every(input => {
       var output = EntityPolicy.decode(input.encode());
-      console.log(input, output);
       return assert.ok(input.equals(output));
+    });
+  });
+  test('policy can add', _ => {
+    return policyOrder.every((high, i) => {
+      return policyOrder.slice(i + 1)
+        .every(low => EntityPolicy.USER.canChange(low, high));
+    });
+  });
+  test('policy can remove', _ => {
+    var actor = new EntityPolicy(['member', 'remove']);
+    return policyOrder.every((high, i) => {
+      return policyOrder.slice(i + 1)
+        .every(low => actor.canChange(high, low));
+    });
+  });
+  test('policy can change', _ => {
+    var allPolicies = policyOrder.concat([
+      ['add'], ['add', 'remove'], ['remove']
+    ].map(privs => new EntityPolicy(privs)));
+    return allPolicies.every((a, i) => {
+      return allPolicies.filter(b => b !== a)
+        .every(b => EntityPolicy.ADMIN.canChange(a, b));
     });
   });
 

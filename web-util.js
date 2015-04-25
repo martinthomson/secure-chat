@@ -6,7 +6,7 @@ define(['require'], function(require) {
     return a.byteLength - (a.byteOffset || 0);
   }
 
-  /** A utility function for managing concatenation. */
+  /** A utility function for concatenating ArrayBuffers or views thereof. */
   function bsConcat(arrays) {
     var size = arrays.reduce((total, a) => total + bsLength(a), 0);
     var index = 0;
@@ -17,14 +17,14 @@ define(['require'], function(require) {
     }, new Uint8Array(size));
   }
 
-  /** Not constant time */
+  /** Constant time for equal length buffers. */
   function bsEqual(a, b) {
     a = new Uint8Array(a);
     b = new Uint8Array(b);
     if (a.length !== b.length) {
       return false;
     }
-    return a.every((v, i) => v === b[i]);
+    return !a.reduce((eq, v, i) => eq + (v ^ b[i]), 0);
   }
 
   /** Produce a hex string with the given separator. */

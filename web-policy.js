@@ -9,8 +9,8 @@ define(['require', 'web-util'], function(require) {
    * only describes what actions the entity can take with respect to the roster
    * itself.
    *
-   * The policy is dictionary of boolean flags that describe an entity's
-   * relationship to the roster:
+   * The policy is list of strings that identify an entity's privileges in the
+   * roster:
    *
    * - member: whether the entity is considered to be a member
    *
@@ -22,8 +22,8 @@ define(['require', 'web-util'], function(require) {
    *
    * All users are assumed to be able to modify their own status.
    */
-  function EntityPolicy(policy) {
-    util.mergeDict([policy], this);
+  function EntityPolicy(privileges) {
+    privileges.forEach(priv => this[priv] = true);
   }
   EntityPolicy.prototype = {
     /** Turn into an Uint8Array. */
@@ -78,20 +78,17 @@ define(['require', 'web-util'], function(require) {
     if ((v >>> 6) !== 0) {
       throw new Error('unsupported policy version');
     }
-    return new EntityPolicy({
+    return util.mergeDict([{
       member: !!(v & (1 << 5)),
       add: !!(v & (1 << 4)),
       remove: !!(v & (1 << 3))
-    });
+    }], new EntityPolicy([]));
   };
 
-  EntityPolicy.ADMIN =
-    new EntityPolicy({ member: true, add: true, remove: true });
-  EntityPolicy.USER =
-    new EntityPolicy({ member: true, add: true, remove: false });
-  EntityPolicy.OBSERVER =
-    new EntityPolicy({ member: true, add: false, remove: false });
-  EntityPolicy.NONE = new EntityPolicy({ });
+  EntityPolicy.ADMIN = new EntityPolicy(['member', 'add', 'remove']);
+  EntityPolicy.USER = new EntityPolicy(['member', 'add']);
+  EntityPolicy.OBSERVER = new EntityPolicy(['member']);
+  EntityPolicy.NONE = new EntityPolicy([]);
 
   return EntityPolicy;
 });
