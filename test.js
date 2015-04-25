@@ -1,7 +1,7 @@
-define(['require', 'web-util'], function(require) {
+define(['require', 'util'], function(require) {
   'use strict';
 
-  var util = require('web-util');
+  var util = require('util');
 
   var toText = x => {
     if (x instanceof ArrayBuffer || ArrayBuffer.isView(x)) {

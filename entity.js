@@ -1,8 +1,8 @@
-define(['require', 'web-util'], function(require) {
+define(['require', 'util'], function(require) {
   'use strict';
 
   var c = crypto.subtle;
-  var util = require('web-util');
+  var util = require('util');
 
   const CURVE = 'P-256';
   const ECDSA_KEY = { name: 'ECDSA', namedCurve: CURVE };

@@ -1,10 +1,10 @@
-define(['require', 'web-util', 'web-entity', 'web-policy'], function(require) {
+define(['require', 'util', 'entity', 'policy'], function(require) {
   'use strict';
 
   var c = crypto.subtle;
-  var util = require('web-util');
-  var EntityPolicy = require('web-policy');
-  var PublicEntity = require('web-entity').PublicEntity;
+  var util = require('util');
+  var EntityPolicy = require('policy');
+  var PublicEntity = require('entity').PublicEntity;
 
   var HASH = 'SHA-256';
   // Hash some junk and then change the output to zeros.  Which allows for hash

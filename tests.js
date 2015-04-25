@@ -1,13 +1,13 @@
-var deps = ['require', 'web-entity', 'web-policy',
-            'web-roster', 'web-util', 'web-test'];
+var deps = ['require', 'entity', 'policy',
+            'roster', 'util', 'test'];
 require(deps, function(require) {
   'use strict';
 
-  var run = require('web-test').run;
-  var test = require('web-test').test;
-  var assert = require('web-test').assert;
+  var run = require('test').run;
+  var test = require('test').test;
+  var assert = require('test').assert;
 
-  var EntityPolicy = require('web-policy');
+  var EntityPolicy = require('policy');
 
   var policyOrder = [ EntityPolicy.ADMIN, EntityPolicy.USER,
                 EntityPolicy.OBSERVER, EntityPolicy.NONE ];
@@ -48,7 +48,7 @@ require(deps, function(require) {
     });
   });
 
-  var Entity = require('web-entity').Entity;
+  var Entity = require('entity').Entity;
 
   test('entity identity', _ => new Entity().identity);
   test('entity share', _ => new Entity().share);
@@ -60,7 +60,7 @@ require(deps, function(require) {
       .then(assert.ok);
   });
 
-  var AgentRoster = require('web-roster').AgentRoster;
+  var AgentRoster = require('roster').AgentRoster;
 
   test('create roster', _ => AgentRoster.create(new Entity()));
   test('create roster and check it', _ => {
