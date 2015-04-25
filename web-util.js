@@ -87,11 +87,13 @@ define(['require'], function(require) {
     ).then(_ => result);
   }
 
-  function mergeDict(objs) {
+  /** Merges the list of dictionaries.  With `host`, it merges into the provided
+   * object; without host, it creates a new one. */
+  function mergeDict(objs, host) {
     return objs.reduce((c, o) => {
       Object.keys(o).forEach(k => c[k] = o[k]);
       return c;
-    }, {});
+    }, host || {});
   }
 
   return {

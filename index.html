@@ -1,25 +1,39 @@
 <!DOCTYPE html>
 <html>
   <head>
-    <script data-main="web-test.js" src="require.js" type="application/javascript"></script>
+    <script data-main="web-tests.js" src="require.js" type="application/javascript"></script>
     <style type="text/css">
-      table { max-width: 800px;  }
+      table {
+        width: 800px; margin: 10px auto; font-family: sans-serif;
+        border-collapse: collapse;
+      }
       th, td { padding: 2px 7px; font-size: 95%;  }
       th { text-align:left; }
       td { vertical-align: baseline; }
       td:nth-child(2n) { max-width: 250px; }
-      td:nth-child(3n) {
+      td:nth-child(4n) {
         font-family: monospace; font-size: 90%;
-        max-width: 600px; max-height: 120px; overflow: scroll;
+        max-width: 500px; max-height: 120px; overflow: hidden;
       }
+      #test_run {
+        font-weight: bold; text-align: center;
+        cursor: pointer; background-color: #ea4;
+      }
+      .pass:last-child { background-color: #2e5; }
+      .fail { cursor: pointer; }
+      .fail:last-child { background-color: #e33; }
     </style>
   </head>
   <body>
     <table>
+      <tr><th>Secure Chat Tests</th></tr>
+      <tr><td id="test_run">Run All Tests</td></tr>
+    </table>
+    <table>
       <thead>
-        <th></th><th>Test</th><th>Output</th>
+        <th></th><th>Test</th><th>Time</th><th>Output</th>
       </thead>
-      <tbody id="results"></tbody>
+      <tbody id="test_results"></tbody>
     </table>
   </body>
 </html>

@@ -22,18 +22,16 @@ define(['require', 'web-util'], function(require) {
    *
    * All users are assumed to be able to modify their own status.
    */
-  function EntityPolicy(version, policy) {
-    this.version = version;
-    this.policy = policy;
+  function EntityPolicy(policy) {
+    util.mergeDict([policy], this);
   }
   EntityPolicy.prototype = {
     /** Turn into an Uint8Array. */
     encode: function() {
       return Uint8Array.from([
-        this.version << 6 |
-          (this.policy.member ? (1 << 5) : 0) |
-          (this.policy.add ? (1 << 4) : 0) |
-          (this.policy.remove ? (1 << 3) : 0)
+        (this.member ? (1 << 5) : 0) |
+          (this.add ? (1 << 4) : 0) |
+          (this.remove ? (1 << 3) : 0)
       ]);
     },
 
@@ -41,53 +39,59 @@ define(['require', 'web-util'], function(require) {
      * in the other policy.  This is used to determine if the user with this
      * policy can set this policy on others. */
     subsumes: function(other) {
-      if (this.version !== other.version) {
-        return false;
-      }
-      return Object.keys(other.policy)
-        .every(k => (this.policy[k] || !other.policy[k]));
+      return Object.keys(other)
+        .every(k => (this[k] || !other[k]));
     },
 
     /** Simple comparator */
     equals: function(other) {
-      if (this.version !== other.version) {
-        return false;
-      }
-      var eq = k => this.policy[k] === other.policy[k];
-      return Object.keys(other.policy).every(eq) &&
-        Object.keys(this.policy).every(eq);
+      // Note: use boolean coercion explicitly
+      // to allow undefined to compare equal to false
+      var eq = k => !this[k] === !other[k];
+      return Object.keys(other).every(eq) &&
+        Object.keys(this).every(eq);
     },
 
-    /** Returns true if the change to another entity is permitted.  This first
-     * checks is the current policy subsumes the new policy: we can't permit a
-     * member to add properties that they do not have themselves.  Then it
-     * checks that the changes are legal.
+    /** Returns true if an actor with this policy is permitted to make the
+     * proposed change to another entity.
      */
     canChange: function(oldPolicy, newPolicy) {
-      return this.subsumes(newPolicy) && (
-        (this.policy.add && this.policy.remove) ||
-          (this.policy.remove && oldPolicy.subsumes(newPolicy)) ||
-          (this.policy.add && newPolicy.subsumes(oldPolicy))
-      );
+      // No lame changes allowed.
+      return !newPolicy.equals(oldPolicy) &&
+        // Check if the current policy subsumes the new policy: don't allow
+        // adding add privileges that members don't have themselves.
+        this.subsumes(newPolicy) && (
+          // If you can both add or remove, no more checks needed.
+          (this.add && this.remove) ||
+          // If you can only remove, then you need to remove.
+          (this.remove && oldPolicy.subsumes(newPolicy)) ||
+          // If you can add, then you have to be granting privileges and you
+          // must grant at least member privilege.
+          (this.add && newPolicy.subsumes(oldPolicy) &&
+           newPolicy.member)
+        );
     }
   };
 
   EntityPolicy.decode = buf => {
-    var v = toUint8Array(buf)[0];
-    return new EntityPolicy(v >>> 6, {
-      member: v & (1 << 5),
-      add: v & (1 << 4),
-      remove: v & (1 << 3)
+    var v = new Uint8Array(buf)[0];
+    if ((v >>> 6) !== 0) {
+      throw new Error('unsupported policy version');
+    }
+    return new EntityPolicy({
+      member: !!(v & (1 << 5)),
+      add: !!(v & (1 << 4)),
+      remove: !!(v & (1 << 3))
     });
   };
 
   EntityPolicy.ADMIN =
-    new EntityPolicy(0, { member: true, add: true, change: true });
+    new EntityPolicy({ member: true, add: true, remove: true });
   EntityPolicy.USER =
-    new EntityPolicy(0, { member: true, add: true, change: false });
+    new EntityPolicy({ member: true, add: true, remove: false });
   EntityPolicy.OBSERVER =
-    new EntityPolicy(0, { member: true, add: false, change: false });
-  EntityPolicy.NONE = new EntityPolicy(0, { });
+    new EntityPolicy({ member: true, add: false, remove: false });
+  EntityPolicy.NONE = new EntityPolicy({ });
 
   return EntityPolicy;
 });

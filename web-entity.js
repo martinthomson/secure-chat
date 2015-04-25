@@ -8,7 +8,7 @@ define(['require', 'web-util'], function(require) {
   const ECDSA_KEY = { name: 'ECDSA', namedCurve: CURVE };
   const ECDSA_SIGN = { name: 'ECDSA', hash: 'SHA-256' };
   const ECDH = { name: 'ECDH', namedCurve: CURVE };
-  // This identifies P-256, which we need until we support 'raw'
+  // These identify P-256, which we need until we support 'raw'
   const SPKI_PREFIX = new Uint8Array([
     48, 86, 48, 16, 6, 4, 43, 129, 4, 112, 6, 8,
     42, 134, 72, 206, 61, 3, 1, 7, 3, 66, 0
@@ -19,27 +19,24 @@ define(['require', 'web-util'], function(require) {
    * value.
    *
    * The signing key (sig) is mandatory; the ECDH share (ecdh) is optional.  You
-   * don't get an ECDH on the entity that adds someone to the log.  Attempts to
-   * retrieve an absent ECDH share will fail.
+   * don't get an ECDH on the actor entity that adds another (subject) entity to
+   * the log.  Attempts to retrieve an absent ECDH share will produce errors.
    */
   function PublicEntity(sig, ecdh) {
     this.signPublic = (sig instanceof CryptoKey) ? Promise.resolve(sig) :
       c.importKey('spki', util.bsConcat([SPKI_PREFIX, sig]),
-                  ECDSA_KEY, false, ['verify']);
-    if (ecdhPublic) {
+                  ECDSA_KEY, true, ['verify']);
+    if (ecdh) {
       this.ecdhPublic = (ecdh instanceof CryptoKey) ? Promise.resolve(ecdh) :
         c.importKey('spki', util.bsConcat([SPKI_PREFIX, ecdh]),
-                    ECDH, false, ['deriveBits']);
-    } else {
-      this.ecdhPublic = Promise.reject(new Error('no share for this entity'));
+                    ECDH, true, ['deriveBits']);
     }
   }
   PublicEntity.prototype = {
     /** Verify that a message came from this entity. */
     verify: function(signature, message) {
       return this.signPublic
-        .then(key => c.verify(ECDSA_SIGN, this.signatureKey,
-                              signature, message));
+        .then(key => c.verify(ECDSA_SIGN, key, signature, message));
     },
 
     /** Returns a promise with the raw public signature key. */
@@ -56,6 +53,7 @@ define(['require', 'web-util'], function(require) {
         .then(spki => spki.slice(SPKI_PREFIX.length));
     },
 
+    /** Encodes into a binary form. */
     encode: function() {
       return Promise.all([this.identity, this.share])
         .then(util.bsConcat);
@@ -93,6 +91,11 @@ define(['require', 'web-util'], function(require) {
       return Promise.all([this.signKey, this.ecdhKey])
         .then(keys => new PublicEntity(keys[0].publicKey, keys[1].publicKey));
     },
+
+    /** Encodes into a binary form.  This isn't reversible:
+     * PublicEntity.decode() can be used to get a PublicEntity instance from the
+     * encoded form, but the private keys will be lost. */
+    encode: PublicEntity.prototype.encode,
 
     /** Returns a promise to generate a signature over the message. */
     sign: function(message) {
