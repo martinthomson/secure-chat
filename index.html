@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script data-main="web-test.js" src="require.js" type="application/javascript"></script>
+    <style type="text/css">
+      table { max-width: 800px;  }
+      th, td { padding: 2px 7px; font-size: 95%;  }
+      th { text-align:left; }
+      td { vertical-align: baseline; }
+      td:nth-child(2n) { max-width: 250px; }
+      td:nth-child(3n) {
+        font-family: monospace; font-size: 90%;
+        max-width: 600px; max-height: 120px; overflow: scroll;
+      }
+    </style>
+  </head>
+  <body>
+    <table>
+      <thead>
+        <th></th><th>Test</th><th>Output</th>
+      </thead>
+      <tbody id="results"></tbody>
+    </table>
+  </body>
+</html>
