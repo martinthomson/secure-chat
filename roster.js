@@ -15,46 +15,46 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return h;
   });
 
-  var RosterOperation = {
-    CHANGE: 0,
-    SHARE: 1,
-
-    encode: v => new Uint8Array([v]),
-    decode: buf => {
-      var v = new Uint8Array(buf)[0];
-      if (v !== RosterOperation.CHANGE &&
-          v !== RosterOperation.SHARE) {
-        throw new Error('invalid operation');
-      }
-      return v;
+  function RosterOpcode(op) {
+    this.opcode = op;
+  }
+  RosterOpcode.prototype = {
+    encode: function() {
+      return new Uint8Array([this.opcode]);
     }
   };
+  RosterOpcode.decode = function(buf) {
+    return new RosterOpcode(new Uint8Array(buf)[0]);
+  };
+  RosterOpcode.CHANGE = new RosterOpcode(0);
+  RosterOpcode.SHARE = new RosterOpcode(1);
 
   /**
    * Create a new roster entry.
    *
-   * @op the RosterOperation to use
-   * @policy an EntityPolicy instance
-   * @subject the entity that is being changed; a PublicEntity.
-   * @actor the entity generating the entry; if this.encode() is needed, this
-   *        will need to be an instance of Entity; otherwise PublicEntity is OK.
-   * @hash a promise to a hash of the current last entry in the log
+   * Takes a dictionary of values:
+   *
+   * operation: the RosterOpcode to use
+   * for CHANGE, this also must include:
+   * - policy: the new EntityPolicy to apply.
+   * - subject: the entity that is being changed; a PublicEntity or Entity.
+   * for SHARE, the actor is enough.
+   *
+   * actor the entity generating the entry; an Entity.
    */
-  function RosterEntry(values) {
-    util.mergeDict([values], this);
+  function RosterOperation(actor) {
+    this.actor = actor;
   }
 
-  /** Encodes this, taking a promise to the hash of the last value */
-  RosterEntry.prototype.encode = function(lastEntryHash) {
-    var pieces = [RosterOperation.encode(this.operation) ];
-    if (this.operation === RosterOperation.CHANGE) {
-      pieces.push(this.subject.identity);
-      pieces.push(this.policy.encode());
-    } else if (this.operation === RosterOperation.SHARE) {
-      pieces.push(this.subject.share);
-    } else {
-      throw new Error('invalid operation');
-    }
+  /** Encodes this.  This takes a promise to the hash of the previous entry. */
+  RosterOperation.prototype.encode = function(lastEntryHash) {
+    var pieces = [].concat(
+      this.opcode.encode(),
+      this._encodeParts(),
+      this.actor.identity,
+      lastEntryHash
+    );
+
     pieces.push(this.actor.identity);
     pieces.push(lastEntryHash);
     return Promise.all(pieces)
@@ -65,39 +65,61 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       });
   };
 
+  function ChangeOperation(actor, subject, policy) {
+    RosterOperation.call(this, actor);
+    this.opcode = RosterOpcode.CHANGE;
+    this.subject = subject;
+    this.policy = policy;
+  }
+  ChangeOperation.prototype = Object.create(RosterOperation.prototype);
+  ChangeOperation.prototype._encodeParts = function() {
+    return [ this.subject.identity, this.policy.encode() ];
+  };
+
+  function ShareOperation(actor) {
+    RosterOperation.call(this, actor);
+    this.opcode = RosterOpcode.SHARE;
+    this.subject = actor;
+  }
+  ShareOperation.prototype = Object.create(RosterOperation.prototype);
+  ShareOperation.prototype._encodeParts = function() {
+    return [ this.subject.share ];
+  };
+
   // Calculate some lengths based on the same principle: generate a real value
   // and work out how big it is.  When the algorithm details are nailed down,
   // this won't be necessary.
-  RosterEntry.lengths = (function() {
+  RosterOperation.lengths = (function() {
     return PublicEntity.lengths.then(
       entityLengths => util.promiseDict(
         util.mergeDict([entityLengths], {
-          operation: util.bsLength(RosterOperation.encode(RosterOperation.CHANGE)),
-          policy: util.bsLength(EntityPolicy.NONE.encode()),
-          hash: allZeroHash.then(util.bsLength)
+          opcode: RosterOpcode.CHANGE.encode().byteLength,
+          policy: EntityPolicy.NONE.encode().byteLength,
+          hash: allZeroHash.then(x => x.byteLength)
         }))
     );
   }());
 
-  RosterEntry._decodeEntry = function(parser, lengths) {
-    var entry = {
-      operation: RosterOperation.decode(parser.next(lengths.operation))
-    };
+  RosterOperation._decodeOperation = function(parser, lengths) {
+    console.log(parser, new Uint8Array(parser._buf), parser.range(0, 1));
+    var opcode = RosterOpcode.decode(parser.next(lengths.opcode));
 
-    if (entry.operation === RosterOperation.CHANGE) {
-      entry.subject = new PublicEntity(parser.next(lengths.identifier));
-      entry.policy = EntityPolicy.decode(parser.next(lengths.policy));
-    } else if (entry.operation === RosterOperation.SHARE) {
-      entry.share = parser.next(lengths.share);
-    } else {
-      throw new Error('invalid operation');
+    if (opcode === RosterOpcode.CHANGE) {
+      var subject = new PublicEntity(parser.next(lengths.identifier));
+      var policy = EntityPolicy.decode(parser.next(lengths.policy));
+      var actor = new PublicEntity(parser.next(lengths.identifier));
+      return new ChangeOperation(actor, subject, policy);
     }
-    entry.actor = new PublicEntity(parser.next(lengths.identifier));
-    return entry;
+    if (opcode === RosterOpcode.SHARE) {
+      var share = parser.next(lengths.share);
+      var actor = new PublicEntity(parser.next(lengths.identifier), share);
+      return new ShareOperation(actor);
+    }
+    throw new Error('invalid operation: ' + opcode);
   };
 
-  RosterEntry._checkHashAndSig = function(actor, lastHash, hash,
-                                          signed, signature) {
+  RosterOperation._checkHashAndSig = function(actor, lastHash, hash,
+                                              signed, signature) {
     return Promise.all([
       actor.verify(signature, signed)
         .then(ok => {
@@ -120,19 +142,19 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
    * @lastHash is a promise for a hash of the last message (which will be turned
    *           into the all zero value if omitted).
    */
-  RosterEntry.decode = function(parser, lastHash) {
-    return RosterEntry.lengths.then(lengths => {
+  RosterOperation.decode = function(parser, lastHash) {
+    return RosterOperation.lengths.then(lengths => {
       var startPosition = parser.position;
 
-      var entry = RosterEntry._decodeEntry(parser, lengths);
+      var op = RosterOperation._decodeOperation(parser, lengths);
 
       var hash = parser.next(lengths.hash);
       var signatureMessage = parser.range(startPosition, parser.position);
       var signature = parser.next(lengths.signature);
-      return RosterEntry._checkHashAndSig(
-        entry.actor, (lastHash || allZeroHash),
-        hash, signatureMessage, signature
-      ).then(_ => new RosterEntry(entry));
+      return RosterOperation._checkHashAndSig(
+        op.actor, lastHash, hash,
+        signatureMessage, signature
+      ).then(_ => op);
     });
   };
 
@@ -143,16 +165,12 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }
   CacheEntry.prototype = Object.create(PublicEntity.prototype);
 
-  function Roster(entries) {
-    this.entries = [].concat(entries);
-    this.lastHash = c.digest(HASH, this.last);
+  function Roster(log) {
+    this.log = [].concat(log);
+    this._rebuildCache();
   }
 
   Roster.prototype = {
-    get last() {
-      return this.entries[this.entries.length - 1];
-    },
-
     getCachedPolicy: function(entity) {
       return entity.identifier.then(id => {
         return this.cache[util.base64url.encode(id)];
@@ -162,7 +180,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     _updateCacheEntry: function(entry) {
       return Roster._cacheKey(entry.subject)
         .then(k => {
-          if (entry.operation === RosterOperation.CHANGE) {
+          if (entry.opcode === RosterOpcode.CHANGE) {
             if (!this.cache[k]) {
               this.cache[k] = new CacheEntry(entry.subject, entry.policy);
             } else if (entry.policy.member) {
@@ -170,11 +188,11 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
             } else {
               delete this.cache[k];
             }
-          } else if (entry.operation === RosterOperation.SHARE) {
+          } else if (entry.opcode === RosterOpcode.SHARE) {
             if (!this.cache[k]) {
               throw new Error('not a member');
             }
-            cache[k].share = entry.share;
+            this.cache[k].share = entry.subject.share;
           } else {
             throw new Error('invalid operation');
           }
@@ -184,13 +202,15 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
      * rejects if the entry isn't valid (see RosterEntry.decode).  */
-    _updateEncodedCacheEntry: function(ebuf, lastHash) {
-      return RosterEntry.decode(new util.Parser(ebuf), lastHash)
+    _updateEncodedCacheEntry: function(ebuf, previousHash) {
+      return RosterEntry.decode(new util.Parser(ebuf), previousHash)
         .then(entry => {
           var check = Promise.resolve();
-          // If lastHash is unset, then the entry is the first and the change is
-          // automatically permitted.
-          if (entry.operation === RosterOperation.CHANGE && lastHash) {
+
+          // If previousHash is allZeroHash, then the entry is the first and the
+          // change is automatically permitted.  Otherwise, check.
+          if (entry.opcode === RosterOpcode.CHANGE &&
+              lastHash !== allZeroHash) {
             return this._checkChange(entry.actor, entry.subject, entry.policy);
           }
           return check.then(_ => this._updateCacheEntry(entry));
@@ -198,20 +218,20 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     },
 
     /** Updates all entries in the cache based on the entire transcript. It
-     * returns the value of this.lastHash. */
-    rebuildCache: function() {
+     * returns a promise that awaits the process. */
+    _rebuildCache: function() {
       this.cache = {};
       // For each entry, simultaneously update the cache, and calculate the hash
       // of the entry.  The hash is passed on for validating the next message.
 
       // Note that this updates lastHash directly, which blocks updates.
-      return this.lastHash = this.entries.reduce(
-        (lastHash, ebuf) => {
+      return this.lastHash = this.log.reduce(
+        (previousHash, ebuf) => {
           return util.promiseDict({
-            entry: this._updateEncodedCacheEntry(ebuf, lastHash),
+            entry: this._updateEncodedCacheEntry(ebuf, previousHash),
             hash: c.digest(HASH, ebuf)
           }).then(result => result.hash);
-        }, null);
+        }, allZeroHash);
     },
 
     /** Find a cached entry for the given entity.  This will resolve
@@ -275,7 +295,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       return this.lastHash = util.promiseDict({
         hash: entry.encode(this.lastHash)
           .then(encoded => {
-            this.entries.push(encoded);
+            this.log.push(encoded);
             return c.digest(HASH, encoded);
           }),
         update: this._updateCacheEntry(entry)
@@ -287,12 +307,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
      */
     change: function(actor, subject, policy) {
       return this._checkChange(actor, subject, policy)
-        .then(_ => this._addEntry(new RosterEntry({
-          operation: RosterOperation.CHANGE,
-          policy: policy,
-          subject: subject,
-          actor: actor
-        })));
+        .then(_ => this._addEntry(new ChangeOperation(actor, subject, policy)));
     },
 
     share: function(actor) {
@@ -300,16 +315,12 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         if (!policy.member) {
           throw new Error('not a member');
         }
-        return this._addEntry(new RosterEntry({
-          operation: RosterOperation.SHARE,
-          share: actor.share,
-          actor: actor
-        }));
+        return this._addEntry(new ShareOperation(actor));
       });
     },
 
     toJSON: function() {
-      return this.entries.map(util.bsHex);
+      return this.log.map(util.bsHex);
     }
   };
 
@@ -321,42 +332,35 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   /**
    * Creates a new roster.  Only the creator option is mandatory here.  By
    * default, the creator adds them selves; by default the policy is
-   * EntityPolicy.ADMIN.
+   * EntityPolicy.ADMIN.  If the creator adds themself, this also adds their
+   * share to the log.
    */
-  Roster.create = function(creator, firstMember, policy) {
-    firstMember = firstMember || creator;
+  Roster.create = function(actor, subject, policy) {
+    subject = subject || actor;
     policy = policy || EntityPolicy.ADMIN;
     if (!policy.member || !policy.add) {
-      throw new Error('first member must have "member" and "add" privileges');
+      throw new Error('first entry must have "member" and "add" privileges');
     }
-    var entry = new RosterEntry({
-      operation: RosterOperation.CHANGE,
-      policy: policy,
-      subject: firstMember,
-      actor: creator
-    });
-    return entry.encode(allZeroHash)
-      .then(encoded => new Roster(encoded))
-      .then(roster => {
-        return roster.rebuildCache().then(_ => roster);
-      });
+
+    var roster = new Roster([]);
+
+    // This bypasses validity checks, since the first entry is special.
+    var p = roster._addEntry(new ChangeOperation(actor, subject, policy));
+    if (actor === subject) {
+      p = p.then(_ => roster.share(actor));
+    }
+    return p.then(_ => roster);
   };
 
   Roster.decode = function(buf) {
-    return RosterEntry.lengths
-      .then(len => new Roster(chunkArray(buf, len.entry)))
-      .then(roster => {
-        return roster.rebuildCache().then(_ => roster);
-      });
+    var roster = new Roster([]);
+    // TODO
   };
 
   function UserRoster() {
-    this.entries = [];
   }
 
   return {
-    RosterEntry: RosterEntry, // TODO don't export
-    RosterOperation: RosterOperation,
     Roster: Roster,
     UserRoster: UserRoster
   };

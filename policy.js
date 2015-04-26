@@ -29,10 +29,10 @@ define(['require', 'util'], function(require) {
   EntityPolicy.prototype = {
     /** Turn into an Uint8Array. */
     encode: function() {
-      return Uint8Array.from([
-        (this.member ? (1 << 5) : 0) |
-          (this.add ? (1 << 4) : 0) |
-          (this.remove ? (1 << 3) : 0)
+      return new Uint8Array([
+        (this.member ? (1 << 0) : 0) |
+          (this.add ? (1 << 1) : 0) |
+          (this.remove ? (1 << 2) : 0)
       ]);
     },
 
@@ -84,9 +84,9 @@ define(['require', 'util'], function(require) {
       throw new Error('unsupported policy version');
     }
     return util.mergeDict([{
-      member: !!(v & (1 << 5)),
-      add: !!(v & (1 << 4)),
-      remove: !!(v & (1 << 3))
+      member: !!(v & 1 << 0),
+      add: !!(v & (1 << 1)),
+      remove: !!(v & (1 << 2))
     }], new EntityPolicy([]));
   };
 

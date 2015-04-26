@@ -117,9 +117,9 @@ define(['require', 'util'], function(require) {
   PublicEntity.lengths = (function() {
     var dummyEntity = new Entity();
     return util.promiseDict({
-      identifier: dummyEntity.identity.then(util.bsLength),
-      share: dummyEntity.share.then(util.bsLength),
-      signature: dummyEntity.sign(new Uint8Array(1)).then(util.bsLength)
+      identifier: dummyEntity.identity.then(x => x.byteLength),
+      share: dummyEntity.share.then(x => x.byteLength),
+      signature: dummyEntity.sign(new Uint8Array(1)).then(x => x.byteLength)
     });
   }());
 

@@ -84,9 +84,7 @@ require(deps, function(require) {
   });
 
   var Roster = require('roster').Roster;
-  var RosterEntry = require('roster').RosterEntry;
 
-  test('lengths', _ => RosterEntry.lengths);
   test('create roster and find creator', _ => {
     var user = new Entity();
     return Roster.create(user)

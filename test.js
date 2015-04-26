@@ -44,12 +44,13 @@ define(['require', 'util'], function(require) {
   var summary = (start, tests, failed) => {
     var passed = failed.length === 0;
     lastCheckpoint = start;
-    var e = recordResult(passed, 'all tests',
-                         passed ? (tests.length + ' tests run')
-                         : (failed.length + ' of ' +
-                            tests.length + ' tests failed'));
-    e.addEventListener('click', _ => run(failed));
-    e.title = 'Re-run all failed tests';
+    var e = recordResult(passed, tests.length + ' tests run',
+                         passed ? 'all passed'
+                         : (failed.length + ' tests failed'));
+    if (!passed) {
+      e.addEventListener('click', _ => run(failed));
+      e.title = 'Re-run all failed tests';
+    }
   };
 
   var run = tests => {

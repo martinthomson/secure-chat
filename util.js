@@ -2,17 +2,14 @@ define(['require'], function(require) {
   'use strict';
 
   /** bs stands for BufferSource */
-  function bsLength(a) {
-    return a.byteLength;
-  }
 
   /** A utility function for concatenating ArrayBuffers or views thereof. */
   function bsConcat(arrays) {
-    var size = arrays.reduce((total, a) => total + bsLength(a), 0);
+    var size = arrays.reduce((total, a) => total + a.byteLength, 0);
     var index = 0;
     return arrays.reduce((result, a) => {
       result.set(new Uint8Array(a), index);
-      index += bsLength(a);
+      index += a.byteLength;
       return result;
     }, new Uint8Array(size));
   }
@@ -38,13 +35,14 @@ define(['require'], function(require) {
 
   function bsDivide(a, size) {
     a = ArrayBuffer.isView(a) ? a.buffer : a;
+    var offset = a.byteOffset || 0;
     var result = [];
     for (var i = 0; i + size <= a.byteLength; i += size) {
-      result.push(new Uint8Array(a, i, size));
+      result.push(new Uint8Array(a, offset + i, size));
     }
     var remainder = a.byteLength % size;
     if (remainder) {
-      result.push(new Uint8Array(a, a.byteLength - remainder));
+      result.push(new Uint8Array(a, offset + a.byteLength - remainder));
     }
     return result;
   }
@@ -84,17 +82,18 @@ define(['require'], function(require) {
   };
 
   function Parser(buf) {
-    this.position = 0;
-    this.buf = ArrayBuffer.isView(buf) ? buf.buffer : buf;
+    this.position = buf.byteOffset || 0;
+    this._buf = ArrayBuffer.isView(buf) ? buf.buffer : buf;
   }
   Parser.prototype = {
     next: function(len) {
-      var chunk = new Uint8Array(this.buf, this.position, len);
+      var chunk = new Uint8Array(this._buf, this.position, len);
       this.position += len;
+      console.log(chunk, len);
       return chunk;
     },
     range: function(start, end) {
-      return new Uint8Array(this.buf, start, end - start);
+      return new Uint8Array(this._buf, start, end - start);
     }
   };
 
@@ -123,7 +122,6 @@ define(['require'], function(require) {
     bsDivide: bsDivide,
     bsEqual: bsEqual,
     bsHex: bsHex,
-    bsLength: bsLength,
     mergeDict: mergeDict,
     promiseDict: promiseDict,
     Parser: Parser
