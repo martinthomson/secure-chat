@@ -3,7 +3,7 @@ define(['require', 'util'], function(require) {
 
   var util = require('util');
 
-  var toText = x => {
+  var text = x => {
     if (x instanceof ArrayBuffer || ArrayBuffer.isView(x)) {
       return util.bsHex(x, ' ');
     }
@@ -17,7 +17,7 @@ define(['require', 'util'], function(require) {
   var lastCheckpoint = 0;
   var stopwatch = _ => {
     var n = Date.now();
-    var r = (n - lastCheckpoint) + ' ms';
+    var r = (n - lastCheckpoint) + 'ms';
     lastCheckpoint = n;
     return r;
   };
@@ -31,7 +31,7 @@ define(['require', 'util'], function(require) {
     tr.className = pass ? 'pass' : 'fail';
     record.forEach(e => {
       var td = document.createElement('td');
-      td.textContent = toText(e);
+      td.textContent = text(e);
       tr.appendChild(td);
     });
     results_table.appendChild(tr);
@@ -77,10 +77,12 @@ define(['require', 'util'], function(require) {
   var memcmp = (x, y) => util.bsEqual(x, y) && x;
   var assert = {
     fail: m => { throw new Error(m); },
-    ok: x => x || assert.fail('expected true'),
-    faileq: (e, a) => assert.fail('[[' + toText(e) + ']] != [[' + toText(a) + ']]'),
+    failv: (m, v) => assert.fail(m + v.map(x => ' [[' + text(x) + ']]').join('')),
+    ok: x => x || assert.failv('unexpected', [x]),
+    notok: x => !x && ('!' + text(x)) || assert.fail('unexpected', [x]),
+    faileq: (e, a) => assert.failv('not equal', [e, a]),
     eq: (e,a) => (e === a) && a || assert.faileq(e, a),
-    memcmp: (e,a) => memcmp(new Uint8Array(e), new Uint8Array(a)) && a || assert.faileq(e, a)
+    memcmp: (e,a) => memcmp(e, a) && a || assert.faileq(e, a)
   };
 
   return {

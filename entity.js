@@ -14,22 +14,29 @@ define(['require', 'util'], function(require) {
     42, 134, 72, 206, 61, 3, 1, 7, 3, 66, 0
   ]);
 
+  function importPublicKey(pub, alg, usages) {
+    return Promise.resolve(pub).then(pubKey => {
+      if (pubKey instanceof CryptoKey) {
+        return pubKey;
+      }
+      console.log(pubKey);
+      return c.importKey('spki', util.bsConcat([SPKI_PREFIX, pubKey]),
+                         alg, true, usages);
+    });
+  };
+
   /** This is the public identity of a participant. Both sig and ecdh are either
    * the raw public key (as a BufferSource, or a Web Crypto CryptoKey public
    * value.
    *
    * The signing key (sig) is mandatory; the ECDH share (ecdh) is optional.  You
-   * don't get an ECDH on the actor entity that adds another (subject) entity to
-   * the log.  Attempts to retrieve an absent ECDH share will produce errors.
+   * don't get an ECDH until the actor advertises a share.
+   * Both sig and ecdh take an BufferSource, a CryptoKey or a promise for a CryptoKey.
    */
   function PublicEntity(sig, ecdh) {
-    this.signPublic = (sig instanceof CryptoKey) ? Promise.resolve(sig) :
-      c.importKey('spki', util.bsConcat([SPKI_PREFIX, sig]),
-                  ECDSA_KEY, true, ['verify']);
+    this.signPublic = importPublicKey(sig, ECDSA_KEY, ['verify']);
     if (ecdh) {
-      this.ecdhPublic = (ecdh instanceof CryptoKey) ? Promise.resolve(ecdh) :
-        c.importKey('spki', util.bsConcat([SPKI_PREFIX, ecdh]),
-                    ECDH, true, ['deriveBits']);
+      this.share = ecdh;
     }
   }
   PublicEntity.prototype = {
@@ -43,20 +50,21 @@ define(['require', 'util'], function(require) {
     get identity() {
       return this.signPublic
         .then(key => c.exportKey('spki', key))
-        .then(spki => spki.slice(SPKI_PREFIX.length));
+        .then(spki => new Uint8Array(spki, SPKI_PREFIX.length));
     },
 
     /** Returns a promise with the raw ECDH share. Reject is there is none. */
     get share() {
+      if (!this.ecdhPublic) {
+        return null;
+      }
       return this.ecdhPublic
         .then(key => c.exportKey('spki', key))
-        .then(spki => spki.slice(SPKI_PREFIX.length));
+        .then(spki => new Uint8Array(spki, SPKI_PREFIX.length));
     },
 
-    /** Encodes into a binary form. */
-    encode: function() {
-      return Promise.all([this.identity, this.share])
-        .then(util.bsConcat);
+    set share(pub) {
+      this.ecdhPublic = importPublicKey(pub, ECDH, ['deriveBits']);
     }
   };
 
@@ -76,13 +84,13 @@ define(['require', 'util'], function(require) {
     get identity() {
       return this.signKey
         .then(pair => c.exportKey('spki', pair.publicKey))
-        .then(spki => spki.slice(SPKI_PREFIX.length));
+        .then(spki => new Uint8Array(spki, SPKI_PREFIX.length));
     },
 
     get share() {
       return this.ecdhKey
         .then(pair => c.exportKey('spki', pair.publicKey))
-        .then(spki => spki.slice(SPKI_PREFIX.length));
+        .then(spki => new Uint8Array(spki, SPKI_PREFIX.length));
     },
 
     /** This shouldn't be necessary, since objects of type Entity behave exactly
@@ -113,23 +121,8 @@ define(['require', 'util'], function(require) {
       identifier: dummyEntity.identity.then(util.bsLength),
       share: dummyEntity.share.then(util.bsLength),
       signature: dummyEntity.sign(new Uint8Array(1)).then(util.bsLength)
-    }).then(lengths => {
-      lengths.entity = lengths.identifier + lengths.share;
-      return lengths;
     });
   }());
-  PublicEntity.decode = function(buf) {
-    return PublicEntity.lengths.then(lengths => {
-      var pos = 0;
-      var nextChunk = len => {
-        var chunk = buf.slice(pos, pos + len);
-        pos += len;
-        return chunk;
-      };
-      return new PublicEntity(nextChunk(lengths.identifier),
-                              nextChunk(lengths.share));
-    });
-  };
 
   return {
     Entity: Entity,

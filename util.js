@@ -3,7 +3,7 @@ define(['require'], function(require) {
 
   /** bs stands for BufferSource */
   function bsLength(a) {
-    return a.byteLength - (a.byteOffset || 0);
+    return a.byteLength;
   }
 
   /** A utility function for concatenating ArrayBuffers or views thereof. */
@@ -50,6 +50,7 @@ define(['require'], function(require) {
   var base64url = {
     _strmap: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_',
     encode: function(data) {
+      data = new Uint8Array(data);
       var len = Math.ceil(data.length * 4 / 3);
       return chunkArray(data, 3).map(chunk => [
         chunk[0] >>> 2,
@@ -74,6 +75,21 @@ define(['require'], function(require) {
         v[vi++] = y << 6 | z;
       }
       return v;
+    }
+  };
+
+  function Parser(buf) {
+    this.position = 0;
+    this.buf = ArrayBuffer.isView(buf) ? buf.buffer : buf;
+  }
+  Parser.prototype = {
+    next: function(len) {
+      var chunk = new Uint8Array(this.buf, this.position, len);
+      this.position += len;
+      return chunk;
+    },
+    range: function(start, end) {
+      return new Uint8Array(this.buf, start, end - start);
     }
   };
 
@@ -102,7 +118,9 @@ define(['require'], function(require) {
     bsEqual: bsEqual,
     bsHex: bsHex,
     bsLength: bsLength,
+    chunkArray: chunkArray,
     mergeDict: mergeDict,
-    promiseDict: promiseDict
+    promiseDict: promiseDict,
+    Parser: Parser
   };
 });

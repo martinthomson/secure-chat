@@ -16,11 +16,13 @@
         max-width: 500px; max-height: 120px; overflow: hidden;
       }
       #test_run {
-        font-weight: bold; text-align: center;
+        font-weight: bold; text-align: center; padding: 10px;
         cursor: pointer; background-color: #ea4;
       }
       .pass:last-child { background-color: #2d5; }
-      .fail { cursor: pointer; font-weight: bold; }
+      .pass td:first-child { color: #051; font-weight: bold; }
+      .fail td:first-child { color: #510; font-weight: bold; }
+      .fail { cursor: pointer; }
       .fail:last-child { background-color: #d31; color: #fff; }
     </style>
   </head>

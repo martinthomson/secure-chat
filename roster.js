@@ -15,90 +15,140 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return h;
   });
 
+  var RosterOperation = {
+    CHANGE: 0,
+    SHARE: 1,
+
+    encode: v => new Uint8Array([v]),
+    decode: buf => {
+      var v = new Uint8Array(buf)[0];
+      if (v !== RosterOperation.CHANGE &&
+          v !== RosterOperation.SHARE) {
+        throw new Error('invalid operation');
+      }
+      return v;
+    }
+  };
 
   /**
    * Create a new roster entry.
    *
+   * @op the RosterOperation to use
    * @policy an EntityPolicy instance
    * @subject the entity that is being changed; a PublicEntity.
    * @actor the entity generating the entry; if this.encode() is needed, this
    *        will need to be an instance of Entity; otherwise PublicEntity is OK.
    * @hash a promise to a hash of the current last entry in the log
    */
-  function RosterEntry(policy, subject, actor) {
-    this.policy = policy;
-    this.subject = subject;
-    this.actor = actor;
+  function RosterEntry(values) {
+    util.mergeDict([values], this);
   }
-  RosterEntry.prototype = {
-    /** Encodes this, taking a promise to the hash of the last value */
-    encode: function(lastEntryHash) {
-      return Promise.all([this.policy.encode(), this.subject.encode(),
-                          this.actor.identity, lastEntryHash])
-        .then(pieces => {
-          var msg = util.bsConcat(pieces);
-          return this.actor.sign(msg)
-            .then(sig => util.bsConcat([msg, sig]))
-        });
+
+  /** Encodes this, taking a promise to the hash of the last value */
+  RosterEntry.prototype.encode = function(lastEntryHash) {
+    var pieces = [RosterOperation.encode(this.operation) ];
+    if (this.operation === RosterOperation.CHANGE) {
+      pieces.push(this.subject.identity);
+      pieces.push(this.policy.encode());
+    } else if (this.operation === RosterOperation.SHARE) {
+      pieces.push(this.subject.share);
+    } else {
+      throw new Error('invalid operation');
     }
+    pieces.push(this.actor.identity);
+    pieces.push(lastEntryHash);
+    return Promise.all(pieces)
+      .then(encodedPieces => {
+        var msg = util.bsConcat(encodedPieces);
+        return this.actor.sign(msg)
+          .then(sig => util.bsConcat([msg, sig]))
+      });
   };
+
   // Calculate some lengths based on the same principle: generate a real value
   // and work out how big it is.  When the algorithm details are nailed down,
   // this won't be necessary.
   RosterEntry.lengths = (function() {
     return PublicEntity.lengths.then(
-      entityLengths => util.promiseDict(util.mergeDict([{
-        policy: util.bsLength(EntityPolicy.NONE.encode()),
-        hash: allZeroHash.then(util.bsLength)
-      }, entityLengths]))
+      entityLengths => util.promiseDict(
+        util.mergeDict([entityLengths], {
+          operation: util.bsLength(RosterOperation.encode(RosterOperation.CHANGE)),
+          policy: util.bsLength(EntityPolicy.NONE.encode()),
+          hash: allZeroHash.then(util.bsLength)
+        }))
     );
   }());
+
+  RosterEntry._decodeEntry = function(parser, lengths) {
+    var entry = {
+      operation: RosterOperation.decode(parser.next(lengths.operation))
+    };
+
+    if (entry.operation === RosterOperation.CHANGE) {
+      entry.subject = new PublicEntity(parser.next(lengths.identifier));
+      entry.policy = EntityPolicy.decode(parser.next(lengths.policy));
+    } else if (entry.operation === RosterOperation.SHARE) {
+      entry.share = parser.next(lengths.share);
+    } else {
+      throw new Error('invalid operation');
+    }
+    entry.actor = new PublicEntity(parser.next(lengths.identifier));
+    return entry;
+  };
+
+  RosterEntry._checkHashAndSig = function(actor, lastHash, hash,
+                                          signed, signature) {
+    return Promise.all([
+      actor.verify(signature, signed)
+        .then(ok => {
+          if (!ok) {
+            throw new Error('invalid signature on entry');
+          }
+        }),
+      lastHash.then(h => {
+        if (!util.bsEqual(h, hash)) {
+          throw new Error('invalid hash in entry');
+        }
+      })
+    ]);
+  };
 
   /** Decode the buffer into an entry.  Note that this produces a RosterEntry
    * that can't be used with encode.  This rejects if the entry isn't valid.
    *
-   * @buf is the raw bytes of the entry
+   * @parser is the parser that will
    * @lastHash is a promise for a hash of the last message (which will be turned
    *           into the all zero value if omitted).
    */
-  RosterEntry.decode = function(buf, lastHash) {
+  RosterEntry.decode = function(parser, lastHash) {
     return RosterEntry.lengths.then(lengths => {
-      var pos = 0;
-      var nextChunk = len => {
-        var chunk = buf.slice(pos, pos + len);
-        pos += len;
-        return chunk;
-      };
+      var startPosition = parser.position;
 
-      var policy = EntityPolicy.decode(nextChunk(lengths.policy));
-      var pSubject = PublicEntity.decode(nextChunk(lengths.entity));
-      var actor = new PublicEntity(nextChunk(lengths.identifier));
-      var hash = nextChunk(lengths.hash);
-      var signatureMessage = buf.slice(0, pos);
-      var signature = nextChunk(lengths.signature);
+      var entry = RosterEntry._decodeEntry(parser, lengths);
 
-      return util.promiseDict({
-        subject: pSubject,
-        verify: actor.verify(signature, signatureMessage)
-          .then(ok => {
-            if (!ok) {
-              throw new Error('invalid signature on entry');
-            }
-          }),
-        hashCheck: (lastHash || allZeroHash).then(h => {
-          if (!util.bsEqual(h, hash)) {
-            throw new Error('invalid hash in entry');
-          }
-        })
-      }).then(r => new RosterEntry(policy, r.subject, actor));
+      var hash = parser.next(lengths.hash);
+      var signatureMessage = parser.range(startPosition, parser.position);
+      var signature = parser.next(lengths.signature);
+      return RosterEntry._checkHashAndSig(
+        entry.actor, (lastHash || allZeroHash),
+        hash, signatureMessage, signature
+      ).then(_ => new RosterEntry(entry));
     });
   };
 
-  function AgentRoster(initialEntry) {
-    this.entries = [initialEntry];
-    this.lastHash = c.digest(HASH, initialEntry);
+  /** Used internally by the roster to track the status of entities in the roster */
+  function CacheEntry(subject, policy) {
+    PublicEntity.call(this, subject.identity, subject.share);
+    this.policy = policy;
   }
-  AgentRoster.prototype = {
+  CacheEntry.prototype = Object.create(PublicEntity.prototype);
+
+  function Roster(entries) {
+    this.entries = [].concat(entries);
+    this.lastHash = c.digest(HASH, this.last);
+  }
+
+  Roster.prototype = {
     get last() {
       return this.entries[this.entries.length - 1];
     },
@@ -109,20 +159,41 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       });
     },
 
+    _updateCacheEntry: function(entry) {
+      return Roster._cacheKey(entry.subject)
+        .then(k => {
+          if (entry.operation === RosterOperation.CHANGE) {
+            if (!this.cache[k]) {
+              this.cache[k] = new CacheEntry(entry.subject, entry.policy);
+            } else if (entry.policy.member) {
+              this.cache[k].policy = entry.policy;
+            } else {
+              delete this.cache[k];
+            }
+          } else if (entry.operation === RosterOperation.SHARE) {
+            if (!this.cache[k]) {
+              throw new Error('not a member');
+            }
+            cache[k].share = entry.share;
+          } else {
+            throw new Error('invalid operation');
+          }
+        });
+    },
+
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
-     * rejects if the entry isn't valid (see RosterEntry.decode). If lastHash is
-     * unset, then the entry is the first and the change is automatically
-     * permitted. */
-    _updateCacheEntry: function(ebuf, lastHash) {
-      return RosterEntry.decode(ebuf, lastHash)
+     * rejects if the entry isn't valid (see RosterEntry.decode).  */
+    _updateEncodedCacheEntry: function(ebuf, lastHash) {
+      return RosterEntry.decode(new util.Parser(ebuf), lastHash)
         .then(entry => {
           var check = Promise.resolve();
-          if (lastHash) {
-            check = check.then(_ => this._checkChange(entry.actor, entry.subject, entry.policy));
+          // If lastHash is unset, then the entry is the first and the change is
+          // automatically permitted.
+          if (entry.operation === RosterOperation.CHANGE && lastHash) {
+            return this._checkChange(entry.actor, entry.subject, entry.policy);
           }
-          return check.then(_ => AgentRoster._cacheKey(entry.subject))
-            .then(k => this.cache[k] = entry);
+          return check.then(_ => this._updateCacheEntry(entry));
         });
     },
 
@@ -137,7 +208,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       return this.lastHash = this.entries.reduce(
         (lastHash, ebuf) => {
           return util.promiseDict({
-            entry: this._updateCacheEntry(ebuf, lastHash),
+            entry: this._updateEncodedCacheEntry(ebuf, lastHash),
             hash: c.digest(HASH, ebuf)
           }).then(result => result.hash);
         }, null);
@@ -146,8 +217,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     /** Find a cached entry for the given entity.  This will resolve
      * successfully to undefined if there are no entries. */
     find: function(entity) {
-      return AgentRoster._cacheKey(entity)
-        .then(k => this.cache[k]);
+      return Roster._cacheKey(entity).then(k => this.cache[k]);
     },
 
     /** Find a cached policy for the given entity.  This will resolve
@@ -185,59 +255,96 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         });
     },
 
+    /** Appends an entry and returns the updated lastHash. */
+    _addEntry: function(entry) {
+      // This concurrently:
+      //  - encodes the new message and records it
+      //  - updates the cache of latest entries
+
+      // Set a new promise value for lastHash as soon as we decide to commit to
+      // any change. That way, subsequent calls are enqueued behind this.
+
+      // Only resolve that promise when both parts of the operation are
+      // complete.  That way, any attempt to add to the log (the official
+      // transcript) will be assured to get a valid cache state.
+
+      // Drawback: Though it shouldn't, if anything here fails for any reason,
+      // the log can no longer be added to.  All calls to modify the log depend
+      // on the value of the last hash being valid.  It *might* be possible to
+      // back out a failed change, but that would need careful consideration.
+      return this.lastHash = util.promiseDict({
+        hash: entry.encode(this.lastHash)
+          .then(encoded => {
+            this.entries.push(encoded);
+            return c.digest(HASH, encoded);
+          }),
+        update: this._updateCacheEntry(entry)
+      }).then(r => r.hash);
+    },
+
     /** Enact a change in policy for the subject, triggered by actor.  This will
      * reject if the change is not permitted.
      */
     change: function(actor, subject, policy) {
       return this._checkChange(actor, subject, policy)
-        .then(_ => {
-          var entry = new RosterEntry(policy, subject, actor);
+        .then(_ => this._addEntry(new RosterEntry({
+          operation: RosterOperation.CHANGE,
+          policy: policy,
+          subject: subject,
+          actor: actor
+        })));
+    },
 
-          // Note that only one action can be outstanding on the log at a time.
-          // This uses `this.lastHash` as the interlock on operations that
-          // affect the log.  Thus, we need to update lastHash as soon as we
-          // decide to commit to any change so that subsequent calls are
-          // enqueued behind this one.
-
-          // This concurrently:
-          //  - encodes the new message and records it
-          //  - updates the cache of latest entries
-
-          // Important Note: If anything here fails for any reason, the log can
-          // no longer be added to.  All calls to modify the log depend on the
-          // value of the last hash being valid.  It *might* be possible to back
-          // out a failed change, but that would need careful consideration.
-          return this.lastHash = util.promiseDict({
-            hash: entry.encode(this.lastHash)
-              .then(encoded => {
-                this.entries.push(encoded);
-                return c.digest(HASH, encoded);
-              }),
-            update: AgentRoster._cacheKey(subject)
-              .then(k => this.cache[k] = entry)
-          }).then(r => r.hash);
-        });
+    share: function(actor) {
+      return this.findPolicy(actor).then(policy => {
+        if (!policy.member) {
+          throw new Error('not a member');
+        }
+        return this._addEntry(new RosterEntry({
+          operation: RosterOperation.SHARE,
+          share: actor.share,
+          actor: actor
+        }));
+      });
     },
 
     toJSON: function() {
       return this.entries.map(util.bsHex);
     }
   };
+
   /** A simple helper that determines the cache key for an entity. */
-  AgentRoster._cacheKey = function(entity) {
+  Roster._cacheKey = function(entity) {
     return entity.identity.then(id => util.base64url.encode(id));
   };
+
   /**
-   * Creates a new roster.  You can set a different policy here, but
+   * Creates a new roster.  Only the creator option is mandatory here.  By
+   * default, the creator adds them selves; by default the policy is
+   * EntityPolicy.ADMIN.
    */
-  AgentRoster.create = function(creator, policy) {
+  Roster.create = function(creator, firstMember, policy) {
+    firstMember = firstMember || creator;
     policy = policy || EntityPolicy.ADMIN;
     if (!policy.member || !policy.add) {
-      throw new Error('creator must be a member that can add others');
+      throw new Error('first member must have "member" and "add" privileges');
     }
-    var entry = new RosterEntry(policy, creator, creator);
+    var entry = new RosterEntry({
+      operation: RosterOperation.CHANGE,
+      policy: policy,
+      subject: firstMember,
+      actor: creator
+    });
     return entry.encode(allZeroHash)
-      .then(encoded => new AgentRoster(encoded))
+      .then(encoded => new Roster(encoded))
+      .then(roster => {
+        return roster.rebuildCache().then(_ => roster);
+      });
+  };
+
+  Roster.decode = function(buf) {
+    return RosterEntry.lengths
+      .then(len => new Roster(chunkArray(buf, len.entry)))
       .then(roster => {
         return roster.rebuildCache().then(_ => roster);
       });
@@ -249,7 +356,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
   return {
     RosterEntry: RosterEntry, // TODO don't export
-    AgentRoster: AgentRoster,
+    RosterOperation: RosterOperation,
+    Roster: Roster,
     UserRoster: UserRoster
   };
 });

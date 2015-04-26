@@ -7,15 +7,24 @@ require(deps, function(require) {
   var test = require('test').test;
   var assert = require('test').assert;
 
+  var util = require('util');
+
+  test('base64 array buffer',
+       _ => assert.eq(util.base64url.encode(new ArrayBuffer(1)), 'AA'));
+  test('base64 array buffer view',
+       _ => assert.eq(util.base64url.encode(new Uint8Array(1)), 'AA'));
+  test('base64 decode',
+       _ => assert.memcmp(util.base64url.decode('AA'), new ArrayBuffer(1)));
+
   var EntityPolicy = require('policy');
 
   var policyOrder = [ EntityPolicy.ADMIN, EntityPolicy.USER,
-                EntityPolicy.OBSERVER, EntityPolicy.NONE ];
+                      EntityPolicy.OBSERVER, EntityPolicy.NONE ];
   test('policy pecking order', _ => {
     return policyOrder.every((superior, i) => {
-      return assert.ok(superior.equals(superior)) &&
-        policyOrder.slice(i).every(
-          inferior => assert.ok(superior.subsumes(inferior))
+      return policyOrder.slice(i).every(
+        inferior => superior.subsumes(inferior) ||
+          assert.failv('not subsumes', [superior, inferior])
         )
     });
   });
@@ -40,7 +49,7 @@ require(deps, function(require) {
   });
   test('policy can change', _ => {
     var allPolicies = policyOrder.concat([
-      ['add'], ['add', 'remove'], ['remove']
+      ['add'], ['add', 'remove'], ['remove'], ['member', 'remove']
     ].map(privs => new EntityPolicy(privs)));
     return allPolicies.every((a, i) => {
       return allPolicies.filter(b => b !== a)
@@ -60,24 +69,85 @@ require(deps, function(require) {
       .then(assert.ok);
   });
 
-  var AgentRoster = require('roster').AgentRoster;
+  var Roster = require('roster').Roster;
+  var RosterEntry = require('roster').RosterEntry;
 
-  test('create roster', _ => AgentRoster.create(new Entity()));
-  test('create roster and check it', _ => {
+  test('lengths', _ => RosterEntry.lengths);
+  test('create roster and find creator', _ => {
     var user = new Entity();
-    return AgentRoster.create(user)
+    return Roster.create(user)
       .then(roster => roster.find(user))
-      .then(found => {
-        return Promise.all([found.subject.identity,
-                            user.identity])
-          .then(id => assert.memcmp(id[0], id[1]));
+      .then(found => util.promiseDict({
+        found: found.identity,
+        user: user.identity
+      })).then(r => assert.memcmp(r.found, r.user));
+  });
+  test('create roster and find first', _ => {
+    var user = new Entity();
+    var first = new Entity();
+    return Roster.create(user, first)
+      .then(roster => roster.find(first))
+      .then(found => util.promiseDict({
+        found: found.identity,
+        first: first.identity
+      })).then(ids => assert.memcmp(ids.found, ids.first));
+  });
+  test('creator can leave', _ => {
+    var user = new Entity();
+    return Roster.create(user)
+      .then(roster => roster.canChange(user, user, EntityPolicy.NONE))
+      .then(assert.ok);
+  });
+  test('creator can\'t remove first user', _ => {
+    var creator = new Entity();
+    var user = new Entity();
+    return Roster.create(creator, user)
+      .then(roster => roster.canChange(creator, user, EntityPolicy.NONE))
+      .then(assert.notok);
+  });
+  test('policy default is admin', _ => {
+    var user = new Entity();
+    return Roster.create(user)
+      .then(roster => roster.findPolicy(user))
+      .then(policy =>
+            policy.equals(EntityPolicy.ADMIN) ||
+            assert.failv('not admin', [policy]));
+  });
+  test('policy for absent user is none', _ => {
+    var user = new Entity();
+    return Roster.create(user)
+      .then(roster => roster.findPolicy(new Entity()))
+      .then(policy => policy.equals(EntityPolicy.NONE) ||
+            assert.failv('not none', [policy]));
+  });
+  test('add user and change their policy', _ => {
+    var creator = new Entity();
+    var user = new Entity();
+    return Roster.create(creator)
+      .then(roster => {
+        // This produces an incremental transition from
+        // observer to admin and then back to none.
+        var policies = [].concat(policyOrder);
+        policies.reverse();
+        policies = [].concat(policies.slice(1), policyOrder.slice(1));
+        return policies.reduce(
+          (p, policy) => p.then(_ => roster.change(creator, user, policy))
+            .then(_ => roster.findPolicy(user))
+            .then(found => assert.eq(found, policy)),
+          Promise.resolve()
+        );
       });
   });
-  test('create roster and leave', _ => {
-    var user = new Entity();
-    return AgentRoster.create(user)
-       .then(roster => roster.canChange(user, user, EntityPolicy.NONE))
-       .then(assert.ok);
+  test('user can add after creator leaves', _ => {
+    var creator = new Entity();
+    var second = new Entity();
+    var third = new Entity();
+    return Roster.create(creator)
+      .then(
+        roster => roster.change(creator, second, EntityPolicy.USER)
+          .then(_ => roster.change(creator, creator, EntityPolicy.NONE))
+          .then(_ => roster.change(second, third, EntityPolicy.USER))
+      );
   });
   run_tests();
 });

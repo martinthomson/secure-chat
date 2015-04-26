@@ -25,6 +25,7 @@ define(['require', 'util'], function(require) {
   function EntityPolicy(privileges) {
     privileges.forEach(priv => this[priv] = true);
   }
+
   EntityPolicy.prototype = {
     /** Turn into an Uint8Array. */
     encode: function() {
@@ -70,6 +71,10 @@ define(['require', 'util'], function(require) {
           (this.add && newPolicy.subsumes(oldPolicy) &&
            newPolicy.member)
         );
+    },
+
+    toJSON: function() {
+      return Object.keys(this).filter(k => this[k]);
     }
   };
 
