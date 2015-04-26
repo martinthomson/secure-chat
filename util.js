@@ -36,10 +36,15 @@ define(['require'], function(require) {
       .join(sep || '');
   }
 
-  function chunkArray(array, size) {
+  function bsDivide(a, size) {
+    a = ArrayBuffer.isView(a) ? a.buffer : a;
     var result = [];
-    for (var i = 0; i < array.length; i += size) {
-      result.push(array.slice(i, i + size));
+    for (var i = 0; i + size <= a.byteLength; i += size) {
+      result.push(new Uint8Array(a, i, size));
+    }
+    var remainder = a.byteLength % size;
+    if (remainder) {
+      result.push(new Uint8Array(a, a.byteLength - remainder));
     }
     return result;
   }
@@ -52,7 +57,7 @@ define(['require'], function(require) {
     encode: function(data) {
       data = new Uint8Array(data);
       var len = Math.ceil(data.length * 4 / 3);
-      return chunkArray(data, 3).map(chunk => [
+      return bsDivide(data, 3).map(chunk => [
         chunk[0] >>> 2,
         ((chunk[0] & 0x3) << 4) | (chunk[1] >>> 4),
         ((chunk[1] & 0xf) << 2) | (chunk[2] >>> 6),
@@ -115,10 +120,10 @@ define(['require'], function(require) {
   return {
     base64url: base64url,
     bsConcat: bsConcat,
+    bsDivide: bsDivide,
     bsEqual: bsEqual,
     bsHex: bsHex,
     bsLength: bsLength,
-    chunkArray: chunkArray,
     mergeDict: mergeDict,
     promiseDict: promiseDict,
     Parser: Parser

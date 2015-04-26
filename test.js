@@ -79,7 +79,7 @@ define(['require', 'util'], function(require) {
     fail: m => { throw new Error(m); },
     failv: (m, v) => assert.fail(m + v.map(x => ' [[' + text(x) + ']]').join('')),
     ok: x => x || assert.failv('unexpected', [x]),
-    notok: x => !x && ('!' + text(x)) || assert.fail('unexpected', [x]),
+    notok: x => !x && ('!' + text(x)) || assert.failv('unexpected', [x]),
     faileq: (e, a) => assert.failv('not equal', [e, a]),
     eq: (e,a) => (e === a) && a || assert.faileq(e, a),
     memcmp: (e,a) => memcmp(e, a) && a || assert.faileq(e, a)

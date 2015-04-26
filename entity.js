@@ -19,7 +19,6 @@ define(['require', 'util'], function(require) {
       if (pubKey instanceof CryptoKey) {
         return pubKey;
       }
-      console.log(pubKey);
       return c.importKey('spki', util.bsConcat([SPKI_PREFIX, pubKey]),
                          alg, true, usages);
     });

@@ -15,6 +15,20 @@ require(deps, function(require) {
        _ => assert.eq(util.base64url.encode(new Uint8Array(1)), 'AA'));
   test('base64 decode',
        _ => assert.memcmp(util.base64url.decode('AA'), new ArrayBuffer(1)));
+  test('divide array buffer', _ => {
+    var divs = util.bsDivide(new ArrayBuffer(10), 3);
+    assert.eq(divs.length, 4);
+    assert.ok(divs.slice(0, 3).every(d => d.byteLength === 3));
+    assert.ok(divs[3].byteLength, 1);
+    console.log(divs);
+    return divs;
+  });
+  test('divide array buffer view', _ => {
+    var divs = util.bsDivide(new ArrayBuffer(10), 5);
+    assert.eq(divs.length, 2);
+    assert.ok(divs.every(d => d.byteLength === 5));
+    return divs;
+  });
 
   var EntityPolicy = require('policy');
 
