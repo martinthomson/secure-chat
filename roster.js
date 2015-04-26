@@ -167,18 +167,18 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
   function Roster(log) {
     this.log = [].concat(log);
-    this._rebuildCache();
+    this.initialized = this._rebuildCache();
   }
 
   Roster.prototype = {
-    getCachedPolicy: function(entity) {
-      return entity.identifier.then(id => {
-        return this.cache[util.base64url.encode(id)];
-      });
+    /** A simple helper that determines the cache key for an entity. */
+    _cacheKey: function(entity) {
+      return entity.identity.then(id => util.base64url.encode(id));
     },
 
+    /** Enacts the change in `entry` on the cache. */
     _updateCacheEntry: function(entry) {
-      return Roster._cacheKey(entry.subject)
+      return this._cacheKey(entry.subject)
         .then(k => {
           if (entry.opcode === RosterOpcode.CHANGE) {
             if (!this.cache[k]) {
@@ -202,48 +202,60 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
      * rejects if the entry isn't valid (see RosterEntry.decode).  */
-    _updateEncodedCacheEntry: function(ebuf, previousHash) {
-      return RosterEntry.decode(new util.Parser(ebuf), previousHash)
+    _updateEncodedCacheEntry: function(ebuf) {
+      return RosterEntry.decode(new util.Parser(ebuf), this.lastHash)
         .then(entry => {
           var check = Promise.resolve();
 
-          // If previousHash is allZeroHash, then the entry is the first and the
-          // change is automatically permitted.  Otherwise, check.
-          if (entry.opcode === RosterOpcode.CHANGE &&
-              lastHash !== allZeroHash) {
-            return this._checkChange(entry.actor, entry.subject, entry.policy);
+          if (entry.opcode === RosterOpcode.CHANGE) {
+            // If previousHash is allZeroHash, then the entry is the first and
+            // the change is automatically permitted.  Otherwise, check.
+            if (this.lastHash !== allZeroHash) {
+              check = this._checkChange(entry.actor, entry.subject, entry.policy);
+            }
+          } else if (entry.opcode === RosterOpcode.SHARE) {
+            check = this._checkShare(entry.subject);
+          } else {
+            throw new Error('invalid opcode');
           }
-          return check.then(_ => this._updateCacheEntry(entry));
+          return check.then(_ => this._addEntry(entry));
         });
     },
 
     /** Updates all entries in the cache based on the entire transcript. It
      * returns a promise that awaits the process. */
     _rebuildCache: function() {
+      // Reset cache state.
       this.cache = {};
-      // For each entry, simultaneously update the cache, and calculate the hash
-      // of the entry.  The hash is passed on for validating the next message.
+      this.lastHash = allZeroHash;
 
-      // Note that this updates lastHash directly, which blocks updates.
-      return this.lastHash = this.log.reduce(
-        (previousHash, ebuf) => {
-          return util.promiseDict({
-            entry: this._updateEncodedCacheEntry(ebuf, previousHash),
-            hash: c.digest(HASH, ebuf)
-          }).then(result => result.hash);
-        }, allZeroHash);
+      return this.log.reduce(
+        (prev, ebuf) => prev.then(_ => this._updateEncodedCacheEntry(ebuf)),
+        Promise.resolve()
+      );
     },
 
     /** Find a cached entry for the given entity.  This will resolve
      * successfully to undefined if there are no entries. */
     find: function(entity) {
-      return Roster._cacheKey(entity).then(k => this.cache[k]);
+      // This waits for this.lastHash so that it knows that the cache is
+      // consistent with the last operation.
+      return util.promiseDict({
+        hash: this.lastHash,
+        key: this._cacheKey(entity)
+      }).then(r => this.cache[r.key]);
     },
 
-    /** Find a cached policy for the given entity.  This will resolve
+    /** Find the cached policy for the given entity.  This will resolve
      * successfully with EntityPolicy.NONE if there are no entries. */
     findPolicy: function(entity) {
       return this.find(entity).then(v => v ? v.policy : EntityPolicy.NONE);
+    },
+
+    /** Find the cached share for the given entity.  This will resolve
+     * successfully with null if there are no entries. */
+    findShare: function(entity) {
+      return this.find(entity).then(v => v ? v.share : null);
     },
 
     /** Determines if a given change in policy is permitted.  Note that this
@@ -310,23 +322,24 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         .then(_ => this._addEntry(new ChangeOperation(actor, subject, policy)));
     },
 
-    share: function(actor) {
+    /** Basic check for membership */
+    _checkShare: function(actor) {
       return this.findPolicy(actor).then(policy => {
         if (!policy.member) {
           throw new Error('not a member');
         }
-        return this._addEntry(new ShareOperation(actor));
       });
+    },
+
+    /** Add a share to this roster. */
+    share: function(actor) {
+      return this._checkShare(actor)
+        .then(_ => this._addEntry(new ShareOperation(actor)));
     },
 
     toJSON: function() {
       return this.log.map(util.bsHex);
     }
-  };
-
-  /** A simple helper that determines the cache key for an entity. */
-  Roster._cacheKey = function(entity) {
-    return entity.identity.then(id => util.base64url.encode(id));
   };
 
   /**
@@ -345,7 +358,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     var roster = new Roster([]);
 
     // This bypasses validity checks, since the first entry is special.
-    var p = roster._addEntry(new ChangeOperation(actor, subject, policy));
+    var p = roster.initialized
+        .then(_ => roster._addEntry(new ChangeOperation(actor, subject, policy)));
     if (actor === subject) {
       p = p.then(_ => roster.share(actor));
     }
@@ -354,7 +368,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
   Roster.decode = function(buf) {
     var roster = new Roster([]);
-    // TODO
+    var parser = new util.Parser(buf);
   };
 
   function UserRoster() {

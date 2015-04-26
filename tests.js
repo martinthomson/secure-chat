@@ -161,5 +161,19 @@ require(deps, function(require) {
           .then(_ => roster.change(second, third, EntityPolicy.USER))
       );
   });
+  test('user can advertise share', _ => {
+    var creator = new Entity();
+    var user = new Entity();
+    return Roster.create(creator, user)
+      .then(
+        roster => roster.share(user)
+          .then(_ => roster.findShare(user))
+          .then(found => util.promiseDict({
+            found: found,
+            user: user.share
+          }))
+          .then(r => assert.memcmp(r.found, r.user))
+      );
+  });
   run_tests();
 });
