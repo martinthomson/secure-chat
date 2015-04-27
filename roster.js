@@ -346,6 +346,16 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         .then(_ => this._addEntry(new ShareOperation(actor)));
     },
 
+    /** Returns a promise for an array of all the active members in the roster.
+     * That is, all those that have provided shares. */
+    allShares: function() {
+      return Promise.all(
+        Object.keys(this.cache)
+          .map(k => this.cache[k].share)
+          .filter(s => !!s)
+      );
+    },
+
     encode: function() {
       return util.bsConcat(this.log);
     },

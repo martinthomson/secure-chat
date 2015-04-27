@@ -20,7 +20,6 @@ require(deps, function(require) {
     assert.eq(divs.length, 4);
     assert.ok(divs.slice(0, 3).every(d => d.byteLength === 3));
     assert.ok(divs[3].byteLength, 1);
-    console.log(divs);
     return divs;
   });
   test('divide array buffer view', _ => {
@@ -84,9 +83,10 @@ require(deps, function(require) {
   });
 
   var Roster = require('roster').Roster;
+  var creator = new Entity();
+  var user = new Entity();
 
   test('create roster and find creator', _ => {
-    var user = new Entity();
     return Roster.create(user)
       .then(roster => roster.find(user))
       .then(found => util.promiseDict({
@@ -95,30 +95,24 @@ require(deps, function(require) {
       })).then(r => assert.memcmp(r.found, r.user));
   });
   test('create roster and find first', _ => {
-    var user = new Entity();
-    var first = new Entity();
-    return Roster.create(user, first)
-      .then(roster => roster.find(first))
+    return Roster.create(creator, user)
+      .then(roster => roster.find(user))
       .then(found => util.promiseDict({
         found: found.identity,
-        first: first.identity
-      })).then(ids => assert.memcmp(ids.found, ids.first));
+        user: user.identity
+      })).then(ids => assert.memcmp(ids.found, ids.user));
   });
   test('creator can leave', _ => {
-    var user = new Entity();
     return Roster.create(user)
       .then(roster => roster.canChange(user, user, EntityPolicy.NONE))
       .then(assert.ok);
   });
   test('creator can\'t remove first user', _ => {
-    var creator = new Entity();
-    var user = new Entity();
     return Roster.create(creator, user)
       .then(roster => roster.canChange(creator, user, EntityPolicy.NONE))
       .then(assert.notok);
   });
   test('policy default is admin', _ => {
-    var user = new Entity();
     return Roster.create(user)
       .then(roster => roster.findPolicy(user))
       .then(policy =>
@@ -126,15 +120,12 @@ require(deps, function(require) {
             assert.failv('not admin', [policy]));
   });
   test('policy for absent user is none', _ => {
-    var user = new Entity();
     return Roster.create(user)
       .then(roster => roster.findPolicy(new Entity()))
       .then(policy => policy.equals(EntityPolicy.NONE) ||
             assert.failv('not none', [policy]));
   });
   test('add user and change their policy', _ => {
-    var creator = new Entity();
-    var user = new Entity();
     return Roster.create(creator)
       .then(roster => {
         // This produces an incremental transition from
@@ -151,19 +142,15 @@ require(deps, function(require) {
       });
   });
   test('user can add after creator leaves', _ => {
-    var creator = new Entity();
-    var second = new Entity();
     var third = new Entity();
     return Roster.create(creator)
       .then(
-        roster => roster.change(creator, second, EntityPolicy.USER)
+        roster => roster.change(creator, user, EntityPolicy.USER)
           .then(_ => roster.change(creator, creator, EntityPolicy.NONE))
-          .then(_ => roster.change(second, third, EntityPolicy.USER))
+          .then(_ => roster.change(user, third, EntityPolicy.USER))
       );
   });
   test('user can advertise share', _ => {
-    var creator = new Entity();
-    var user = new Entity();
     return Roster.create(creator, user)
       .then(
         roster => roster.share(user)
@@ -175,10 +162,10 @@ require(deps, function(require) {
           .then(r => assert.memcmp(r.found, r.user))
       );
   });
-  /** Creates a roster with a creator-admin and one of each other named
-   * policy type.  Returns a map with two keys: users and roster. */
+  /** Creates a roster with a creator-admin and one of each other named policy
+   * type.  Returns a map with two keys: users and roster. All the users have
+   * their shares advertised. */
   var createTestRoster = _ => {
-    var creator = new Entity();
     return Roster.create(creator)
       .then(roster => {
         var policies = ['ADMIN', 'USER', 'OBSERVER'];
@@ -191,6 +178,7 @@ require(deps, function(require) {
           policies.map(
             policy => roster.change(creator, users[policy],
                                     EntityPolicy[policy])
+              .then(_ => roster.share(users[policy]))
           )
         ).then(_ => {
           return { roster: roster, users: users };
@@ -215,7 +203,6 @@ require(deps, function(require) {
     });
   });
 
-  // TODO test roster encode/decode
   // TODO get all shares for the current roster
 
   run_tests();

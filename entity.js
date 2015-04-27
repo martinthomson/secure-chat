@@ -24,13 +24,12 @@ define(['require', 'util'], function(require) {
     });
   };
 
-  /** This is the public identity of a participant. Both sig and ecdh are either
-   * the raw public key (as a BufferSource, or a Web Crypto CryptoKey public
-   * value.
+  /** This is the public identity of a participant. This is the view of a
+   * participant you get from the outside.
    *
    * The signing key (sig) is mandatory; the ECDH share (ecdh) is optional.  You
-   * don't get an ECDH until the actor advertises a share.
-   * Both sig and ecdh take an BufferSource, a CryptoKey or a promise for a CryptoKey.
+   * don't get an ECDH until the entity advertises a share.  Both sig and ecdh
+   * take an BufferSource, a CryptoKey or a promise for either.
    */
   function PublicEntity(sig, ecdh) {
     this.signPublic = importPublicKey(sig, ECDSA_KEY, ['verify']);
