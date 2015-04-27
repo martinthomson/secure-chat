@@ -49,7 +49,8 @@ define(['require', 'util'], function(require) {
       // Note: use boolean coercion explicitly
       // to allow undefined to compare equal to false
       var eq = k => !this[k] === !other[k];
-      return Object.keys(other).every(eq) &&
+      return (other instanceof EntityPolicy) &&
+        Object.keys(other).every(eq) &&
         Object.keys(this).every(eq);
     },
 
@@ -75,6 +76,9 @@ define(['require', 'util'], function(require) {
 
     toJSON: function() {
       return Object.keys(this).filter(k => this[k]);
+    },
+    toString: function() {
+      return JSON.stringify(this);
     }
   };
 

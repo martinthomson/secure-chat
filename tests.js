@@ -175,5 +175,48 @@ require(deps, function(require) {
           .then(r => assert.memcmp(r.found, r.user))
       );
   });
+  /** Creates a roster with a creator-admin and one of each other named
+   * policy type.  Returns a map with two keys: users and roster. */
+  var createTestRoster = _ => {
+    var creator = new Entity();
+    return Roster.create(creator)
+      .then(roster => {
+        var policies = ['ADMIN', 'USER', 'OBSERVER'];
+        var users = policies.reduce(
+          (userMap, policy) => {
+            userMap[policy] = new Entity();
+            return userMap;
+          }, {});
+        return Promise.all(
+          policies.map(
+            policy => roster.change(creator, users[policy],
+                                    EntityPolicy[policy])
+          )
+        ).then(_ => {
+          return { roster: roster, users: users };
+        });
+      });
+  };
+  test('encode and decode', _ => {
+    return createTestRoster().then(result => {
+      // Encode and decode the resulting roster.
+      var encoded = result.roster.encode();
+      var decoded = new Roster([]);
+      return decoded.decode(encoded)
+        .then(_ => {
+          // Get the set of users that we added to the original.
+          var users = Object.keys(result.users)
+              .map(k => result.users[k]);
+          // Find all of them to check that they were copied over.
+          return Promise.all(
+            users.map(u => decoded.find(u))
+          ).then(found => found.map(assert.ok));
+        });
+    });
+  });
+
+  // TODO test roster encode/decode
+  // TODO get all shares for the current roster
+
   run_tests();
 });

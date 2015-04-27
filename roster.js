@@ -21,6 +21,10 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   RosterOpcode.prototype = {
     encode: function() {
       return new Uint8Array([this.opcode]);
+    },
+    equals: function(other) {
+      return other instanceof RosterOpcode &&
+        this.opcode === other.opcode;
     }
   };
   RosterOpcode.decode = function(buf) {
@@ -55,13 +59,13 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       lastEntryHash
     );
 
-    pieces.push(this.actor.identity);
-    pieces.push(lastEntryHash);
     return Promise.all(pieces)
       .then(encodedPieces => {
         var msg = util.bsConcat(encodedPieces);
         return this.actor.sign(msg)
-          .then(sig => util.bsConcat([msg, sig]))
+          .then(sig => {
+            return util.bsConcat([msg, sig]);
+          })
       });
   };
 
@@ -101,21 +105,20 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }());
 
   RosterOperation._decodeOperation = function(parser, lengths) {
-    console.log(parser, new Uint8Array(parser._buf), parser.range(0, 1));
     var opcode = RosterOpcode.decode(parser.next(lengths.opcode));
 
-    if (opcode === RosterOpcode.CHANGE) {
+    if (opcode.equals(RosterOpcode.CHANGE)) {
       var subject = new PublicEntity(parser.next(lengths.identifier));
       var policy = EntityPolicy.decode(parser.next(lengths.policy));
       var actor = new PublicEntity(parser.next(lengths.identifier));
       return new ChangeOperation(actor, subject, policy);
     }
-    if (opcode === RosterOpcode.SHARE) {
+    if (opcode.equals(RosterOpcode.SHARE)) {
       var share = parser.next(lengths.share);
       var actor = new PublicEntity(parser.next(lengths.identifier), share);
       return new ShareOperation(actor);
     }
-    throw new Error('invalid operation: ' + opcode);
+    throw new Error('invalid operation: ' + opcode.opcode);
   };
 
   RosterOperation._checkHashAndSig = function(actor, lastHash, hash,
@@ -149,11 +152,12 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       var op = RosterOperation._decodeOperation(parser, lengths);
 
       var hash = parser.next(lengths.hash);
-      var signatureMessage = parser.range(startPosition, parser.position);
+      var signedMessage = parser.range(startPosition, parser.position);
       var signature = parser.next(lengths.signature);
+
       return RosterOperation._checkHashAndSig(
         op.actor, lastHash, hash,
-        signatureMessage, signature
+        signedMessage, signature
       ).then(_ => op);
     });
   };
@@ -180,7 +184,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     _updateCacheEntry: function(entry) {
       return this._cacheKey(entry.subject)
         .then(k => {
-          if (entry.opcode === RosterOpcode.CHANGE) {
+          if (entry.opcode.equals(RosterOpcode.CHANGE)) {
             if (!this.cache[k]) {
               this.cache[k] = new CacheEntry(entry.subject, entry.policy);
             } else if (entry.policy.member) {
@@ -188,7 +192,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
             } else {
               delete this.cache[k];
             }
-          } else if (entry.opcode === RosterOpcode.SHARE) {
+          } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
             if (!this.cache[k]) {
               throw new Error('not a member');
             }
@@ -202,23 +206,25 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
      * rejects if the entry isn't valid (see RosterEntry.decode).  */
-    _updateEncodedCacheEntry: function(ebuf) {
-      return RosterEntry.decode(new util.Parser(ebuf), this.lastHash)
+    _updateEncodedCacheEntry: function(parser) {
+      var start = parser.position;
+      return RosterOperation.decode(parser, this.lastHash)
         .then(entry => {
+          var encoded = parser.range(start, parser.position);
           var check = Promise.resolve();
 
-          if (entry.opcode === RosterOpcode.CHANGE) {
+          if (entry.opcode.equals(RosterOpcode.CHANGE)) {
             // If previousHash is allZeroHash, then the entry is the first and
             // the change is automatically permitted.  Otherwise, check.
             if (this.lastHash !== allZeroHash) {
               check = this._checkChange(entry.actor, entry.subject, entry.policy);
             }
-          } else if (entry.opcode === RosterOpcode.SHARE) {
+          } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
             check = this._checkShare(entry.subject);
           } else {
             throw new Error('invalid opcode');
           }
-          return check.then(_ => this._addEntry(entry));
+          return check.then(_ => this._addEntry(entry, encoded));
         });
     },
 
@@ -230,20 +236,20 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       this.lastHash = allZeroHash;
 
       return this.log.reduce(
-        (prev, ebuf) => prev.then(_ => this._updateEncodedCacheEntry(ebuf)),
+        (prev, ebuf) => prev.then(
+          _ => this._updateEncodedCacheEntry(new util.Parser(ebuf))
+        ),
         Promise.resolve()
       );
     },
 
     /** Find a cached entry for the given entity.  This will resolve
-     * successfully to undefined if there are no entries. */
+     * successfully to undefined if there are no entries.  Note that while there
+     * is an outstanding write, this might not be up-to-date for affected
+     * entries.
+     */
     find: function(entity) {
-      // This waits for this.lastHash so that it knows that the cache is
-      // consistent with the last operation.
-      return util.promiseDict({
-        hash: this.lastHash,
-        key: this._cacheKey(entity)
-      }).then(r => this.cache[r.key]);
+      return this._cacheKey(entity).then(k => this.cache[k]);
     },
 
     /** Find the cached policy for the given entity.  This will resolve
@@ -272,10 +278,13 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
                 oldPolicy.subsumes(proposed));
       }
 
+      // Find the existing policies for the two parties and see if this is OK.
       return util.promiseDict({
         actor: this.findPolicy(actor),
         subject: this.findPolicy(subject)
-      }).then(policies => policies.actor.canChange(policies.subject, proposed));
+      }).then(
+        policies => policies.actor.canChange(policies.subject, proposed)
+      );
     },
     /** Calls canChange and throws if it returns false. */
     _checkChange: function(actor, subject, proposed) {
@@ -288,7 +297,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     },
 
     /** Appends an entry and returns the updated lastHash. */
-    _addEntry: function(entry) {
+    _addEntry: function(entry, encoded) {
       // This concurrently:
       //  - encodes the new message and records it
       //  - updates the cache of latest entries
@@ -305,10 +314,10 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       // on the value of the last hash being valid.  It *might* be possible to
       // back out a failed change, but that would need careful consideration.
       return this.lastHash = util.promiseDict({
-        hash: entry.encode(this.lastHash)
-          .then(encoded => {
-            this.log.push(encoded);
-            return c.digest(HASH, encoded);
+        hash: Promise.resolve(encoded || entry.encode(this.lastHash))
+          .then(bits => {
+            this.log.push(bits);
+            return c.digest(HASH, bits);
           }),
         update: this._updateCacheEntry(entry)
       }).then(r => r.hash);
@@ -337,6 +346,23 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         .then(_ => this._addEntry(new ShareOperation(actor)));
     },
 
+    encode: function() {
+      return util.bsConcat(this.log);
+    },
+
+    /** Decodes a sequence of entries and adds them to the log. */
+    decode: function(buf) {
+      var parser = new util.Parser(buf);
+      var loadRemainingOperations = _ => {
+        if (parser.remaining <= 0) {
+          return;
+        }
+        return this._updateEncodedCacheEntry(parser)
+          .then(loadRemainingOperations);
+      };
+      return loadRemainingOperations();
+    },
+
     toJSON: function() {
       return this.log.map(util.bsHex);
     }
@@ -356,8 +382,6 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     }
 
     var roster = new Roster([]);
-
-    // This bypasses validity checks, since the first entry is special.
     var p = roster.initialized
         .then(_ => roster._addEntry(new ChangeOperation(actor, subject, policy)));
     if (actor === subject) {
@@ -366,13 +390,14 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return p.then(_ => roster);
   };
 
-  Roster.decode = function(buf) {
-    var roster = new Roster([]);
-    var parser = new util.Parser(buf);
-  };
-
-  function UserRoster() {
+  function UserRoster(log) {
+    Roster.call(this, log);
   }
+  UserRoster.prototype = Object.create(Roster.prototype);
+  UserRoster.prototype._checkShare = function() {
+    throw new Error('no shares on user roster');
+  };
+  // TODO find all shares for a given roster
 
   return {
     Roster: Roster,

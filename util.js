@@ -33,16 +33,34 @@ define(['require'], function(require) {
       .join(sep || '');
   }
 
-  function bsDivide(a, size) {
-    a = ArrayBuffer.isView(a) ? a.buffer : a;
-    var offset = a.byteOffset || 0;
-    var result = [];
-    for (var i = 0; i + size <= a.byteLength; i += size) {
-      result.push(new Uint8Array(a, offset + i, size));
+  /** A simple helper for splitting a BufferSource into pieces. */
+  function Parser(buf) {
+    this.position = buf.byteOffset || 0;
+    this._buf = ArrayBuffer.isView(buf) ? buf.buffer : buf;
+  }
+  Parser.prototype = {
+    next: function(len) {
+      var chunk = new Uint8Array(this._buf, this.position, len);
+      this.position += len;
+      return chunk;
+    },
+    range: function(start, end) {
+      return new Uint8Array(this._buf, start, end - start);
+    },
+    get remaining() {
+      return this._buf.byteLength - this.position;
     }
-    var remainder = a.byteLength % size;
-    if (remainder) {
-      result.push(new Uint8Array(a, offset + a.byteLength - remainder));
+  };
+
+  /** Divides a BufferSource into even chunks. */
+  function bsDivide(a, size) {
+    var parser = new Parser(a);
+    var result = [];
+    while (parser.remaining >= size) {
+      result.push(parser.next(size));
+    }
+    if (parser.remaining) {
+      result.push(parser.next(parser.remaining));
     }
     return result;
   }
@@ -78,22 +96,6 @@ define(['require'], function(require) {
         v[vi++] = y << 6 | z;
       }
       return v;
-    }
-  };
-
-  function Parser(buf) {
-    this.position = buf.byteOffset || 0;
-    this._buf = ArrayBuffer.isView(buf) ? buf.buffer : buf;
-  }
-  Parser.prototype = {
-    next: function(len) {
-      var chunk = new Uint8Array(this._buf, this.position, len);
-      this.position += len;
-      console.log(chunk, len);
-      return chunk;
-    },
-    range: function(start, end) {
-      return new Uint8Array(this._buf, start, end - start);
     }
   };
 
