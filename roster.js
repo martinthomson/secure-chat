@@ -15,8 +15,6 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return h;
   });
 
-  var allRosters = {};
-
   function RosterOpcode(op) {
     this.opcode = op;
   }
@@ -135,6 +133,24 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return entity.identity.then(id => util.base64url.encode(id));
   };
 
+
+  function AllRosters() {
+    this.rosters = {};
+  }
+  AllRosters.prototype = {
+    /** Register a roster.  This takes a second argument, the creator of the
+     * roster for the case of self-registration of a roster.  That happens prior
+     * to the identity of the roster being confirmed. */
+    register: function(roster, creator) {
+      return CacheEntry.key(creator || roster)
+        .then(k => this.rosters[k] = roster)
+    },
+    lookup: function(entity) {
+      return CacheEntry.key(entity).then(k => this.rosters[k])
+    }
+  };
+  var allRosters = new AllRosters();
+
   /** Creates a roster. */
   function Roster() {
     this.log = [];
@@ -208,11 +224,10 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         // Note that we have to register this roster in the global registry
         // *before* resolving the identity; applications will use the resolution
         // of identity as a signal to start using this identity.
-        var resolve = this._resolveIdentity;
+        var gotId = this._resolveIdentity;
         delete this._resolveIdentity;
-        CacheEntry.key(entry.actor)
-          .then(k => allRosters[k] = this)
-          .then(_ => resolve(entry.actor.identity));
+        allRosters.register(this, entry.actor)
+          .then(_ => gotId(entry.actor.identity));
         return true;
       }
       return false;
