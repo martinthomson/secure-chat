@@ -88,13 +88,10 @@ require(deps, function(require) {
 
   test('roster identity matches creator identity', _ => {
     return Roster.create(creator)
-      .then(roster => {
-        console.log('got roster');
-        return util.promiseDict({
+      .then(roster => util.promiseDict({
         roster: roster.identity,
         creator: creator.identity
-        });
-      }).then(r => assert.memcmp(r.roster, r.creator));
+      })).then(r => assert.memcmp(r.roster, r.creator));
   });
   test('create roster and find creator', _ => {
     return Roster.create(creator)

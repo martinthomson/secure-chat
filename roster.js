@@ -15,6 +15,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return h;
   });
 
+  var allRosters = {};
+
   function RosterOpcode(op) {
     this.opcode = op;
   }
@@ -133,9 +135,10 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return entity.identity.then(id => util.base64url.encode(id));
   };
 
-  function Roster(log) {
-    this.log = [].concat(log);
-    this.initialized = this._rebuildCache();
+  /** Creates a roster. */
+  function Roster() {
+    this.log = [];
+    this._rebuildCache();
   }
 
   Roster.prototype = {
@@ -202,8 +205,14 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
     _firstEntry: function(entry) {
       if (this._resolveIdentity) {
-        this._resolveIdentity(entry.actor.identity);
+        // Note that we have to register this roster in the global registry
+        // *before* resolving the identity; applications will use the resolution
+        // of identity as a signal to start using this identity.
+        var resolve = this._resolveIdentity;
         delete this._resolveIdentity;
+        CacheEntry.key(entry.actor)
+          .then(k => allRosters[k] = this)
+          .then(_ => resolve(entry.actor.identity));
         return true;
       }
       return false;
@@ -399,8 +408,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     }
 
     var roster = new Roster([]);
-    var p = roster.initialized
-        .then(_ => roster._addEntry(new ChangeOperation(actor, subject, policy)));
+    var p = roster._addEntry(new ChangeOperation(actor, subject, policy));
     if (actor === subject) {
       p = p.then(_ => roster.share(actor));
     }
