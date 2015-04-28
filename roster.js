@@ -319,7 +319,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       });
       // Update the hash, but asynchronously: don't await it.
       this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
-      return p;
+      return p.then(_ => null);
     },
 
     /** Enact a change in policy for the subject, triggered by actor.  This will

@@ -221,7 +221,5 @@ require(deps, function(require) {
     });
   });
 
-  // TODO get all shares for the current roster
-
   run_tests();
 });
