@@ -33,10 +33,10 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
      * to the identity of the roster being confirmed. */
     register: function(roster, creator) {
       return cacheKey(creator || roster)
-        .then(k => this.rosters[k] = roster)
+        .then(k => this.rosters[k] = roster);
     },
     lookup: function(entity) {
-      return cacheKey(entity).then(k => this.rosters[k])
+      return cacheKey(entity).then(k => this.rosters[k]);
     }
   };
   var allRosters = new AllRosters();
@@ -86,7 +86,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
           return this.actor.sign(msg)
             .then(sig => {
               return util.bsConcat([msg, sig]);
-            })
+            });
         });
     }
   };
@@ -145,26 +145,31 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
   RosterOperation.decode = function(parser, lengths) {
     var opcode = RosterOpcode.decode(parser.next(lengths.opcode));
+    var subject, actor, policy;
 
     if (opcode.equals(RosterOpcode.CHANGE)) {
-      var subject = new PublicEntity(parser.next(lengths.identifier));
-      var policy = EntityPolicy.decode(parser.next(lengths.policy));
-      var actor = new PublicEntity(parser.next(lengths.identifier));
-      return new ChangeOperation(actor, subject, policy);
+      subject = new PublicEntity(parser.next(lengths.identifier));
+      policy = EntityPolicy.decode(parser.next(lengths.policy));
+      actor = new PublicEntity(parser.next(lengths.identifier));
+      return Promise.resolve(new ChangeOperation(actor, subject, policy));
     }
     if (opcode.equals(RosterOpcode.SHARE)) {
       var share = parser.next(lengths.share);
-      var actor = new PublicEntity(parser.next(lengths.identifier), share);
-      return new ShareOperation(actor);
+      actor = new PublicEntity(parser.next(lengths.identifier), share);
+      return Promise.resolve(new ShareOperation(actor));
     }
     if (opcode.equals(RosterOpcode.CHANGE_ROSTER)) {
-      var subject = allRosters.lookup(parser.next(lengths.identifier));
-      var policy = EntityPolicy.decode(parser.next(lengths.policy));
-      var actor = new PublicEntity(parser.next(lengths.identifier));
+      subject = allRosters.lookup(parser.next(lengths.identifier));
+      policy = EntityPolicy.decode(parser.next(lengths.policy));
+      actor = new PublicEntity(parser.next(lengths.identifier));
       var actorRoster = allRosters.lookup(parser.next(lengths.identifier));
-      return new RosterChangeOperation(actor, actorRoster, subject, policy);
+      return util.promiseDict({
+        subject: subject,
+        actorRoster: actorRoster
+      }).then(r => new RosterChangeOperation(actor, r.actorRoster,
+                                             r.subject, policy));
     }
-    throw new Error('invalid operation: ' + opcode.opcode);
+    return Promise.reject(new Error('invalid operation: ' + opcode.opcode));
   };
 
   /** Used internally by the roster to track the status of entities in the roster */
@@ -184,12 +189,18 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   Roster.prototype = {
     /** Determines if the given change is acceptable. */
     _validateEntry: function(entry) {
+      // If this is the first entry, no checks.  A share operation will cause
+      // the roster to become busted, so don't permit that.
+      if (this._resolveIdentity && !entry.opcode.equals(RosterOpcode.SHARE)) {
+        return Promise.resolve();
+      }
+
       if (entry.opcode.equals(RosterOpcode.CHANGE)) {
-        // If this is the first entry, no checks.
-        if (this._resolveIdentity) {
-          return Promise.resolve();
-        }
         return this._checkChange(entry.actor, entry.subject, entry.policy);
+      }
+      if (entry.opcode.equals(RosterOpcode.CHANGE_ROSTER)) {
+        return this._checkRosterChange(entry.actor, entry.actorRoster,
+                                       entry.subject, entry.policy);
       }
       if (entry.opcode.equals(RosterOpcode.SHARE)) {
         return this._checkShare(entry.subject);
@@ -226,8 +237,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
               throw new Error('invalid signature on entry');
             }
           }),
-        this.lastHash.then(h => {
-          if (!util.bsEqual(h, hash)) {
+        this.lastHash.then(prev => {
+          if (!util.bsEqual(prev, hash)) {
             throw new Error('invalid hash in entry');
           }
         })
@@ -239,19 +250,20 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
      */
     _decodeAndAdd: function(parser) {
       var startPosition = parser.position;
-      return RosterOperation.lengths.then(lengths => {
-        var op = RosterOperation.decode(parser, lengths);
+      return RosterOperation.lengths.then(
+        lengths => RosterOperation.decode(parser, lengths)
+          .then(op => {
+            var hash = parser.next(lengths.hash);
+            var signedMessage = parser.range(startPosition, parser.position);
+            var signature = parser.next(lengths.signature);
 
-        var hash = parser.next(lengths.hash);
-        var signedMessage = parser.range(startPosition, parser.position);
-        var signature = parser.next(lengths.signature);
-
-        return this._checkHashAndSig(op.actor, hash, signedMessage, signature)
-          .then(_ => {
-            var encoded = parser.range(startPosition, parser.position);
-            return this._addEntry(op, encoded);
-          });
-      })
+            return this._checkHashAndSig(op.actor, hash, signedMessage, signature)
+              .then(_ => {
+                var encoded = parser.range(startPosition, parser.position);
+                return this._addEntry(op, encoded);
+              });
+          })
+      );
     },
 
     /** Determines if this is the first entry. */
@@ -336,6 +348,20 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
             throw new Error('change forbidden');
           }
         });
+    },
+
+    /** Check that the addition of a roster is OK. */
+    _checkRosterChange: function(actor, actorRoster, subject, proposed) {
+      return Promise.all([
+        this._checkChange(actorRoster, subject, proposed),
+        actorRoster
+          .then(roster => roster.find(actor))
+          .then(found => {
+            if (!found) {
+              throw new Error('actor is not in advertised roster');
+            }
+          })
+      ]);
     },
 
     /** Appends an entry and returns the updated lastHash. */

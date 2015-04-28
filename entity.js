@@ -25,7 +25,7 @@ define(['require', 'util'], function(require) {
       return c.importKey('spki', util.bsConcat([SPKI_PREFIX, pubKey]),
                          alg, true, usages);
     });
-  };
+  }
 
   /** This is the public identity of a participant. This is the view of a
    * participant you get from the outside.

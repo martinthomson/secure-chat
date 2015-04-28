@@ -48,7 +48,7 @@ define(['require', 'util'], function(require) {
     equals: function(other) {
       // Note: use boolean coercion explicitly
       // to allow undefined to compare equal to false
-      var eq = k => !this[k] === !other[k];
+      var eq = k => !this[k] === !other[k]; // jshint ignore:line
       return (other instanceof EntityPolicy) &&
         Object.keys(other).every(eq) &&
         Object.keys(this).every(eq);

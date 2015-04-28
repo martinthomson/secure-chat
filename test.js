@@ -36,7 +36,7 @@ define(['require', 'util'], function(require) {
     });
     results_table.appendChild(tr);
     return tr;
-  }
+  };
 
   var all_tests = [];
   var test = (m,f) => all_tests.push({ msg: m, func: f});

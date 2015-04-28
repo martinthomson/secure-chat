@@ -38,7 +38,7 @@ require(deps, function(require) {
       return policyOrder.slice(i).every(
         inferior => superior.subsumes(inferior) ||
           assert.failv('not subsumes', [superior, inferior])
-        )
+      );
     });
   });
   test('policy encode/decode', _ => {
@@ -75,7 +75,7 @@ require(deps, function(require) {
   test('entity identity', _ => new Entity().identity);
   test('entity share', _ => new Entity().share);
   test('sign and verify', _ => {
-    var e = new Entity;
+    var e = new Entity();
     var msg = new Uint8Array(1);
     return e.sign(msg)
       .then(sig => e.verify(sig, msg))
