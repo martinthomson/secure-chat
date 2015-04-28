@@ -1,4 +1,4 @@
-define(['require'], function(require) {
+define([], function() {
   'use strict';
 
   /** bs stands for BufferSource */

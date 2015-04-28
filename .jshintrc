@@ -1,3 +1,22 @@
 {
-  "esnext": true
+  "esnext": true,
+  "curly": true,
+  "eqeqeq": true,
+  "freeze": true,
+  "latedef": true,
+  "maxcomplexity": 12,
+  "maxdepth": 5,
+  "maxparams": 5,
+  "maxstatements": 40,
+  "noarg": true,
+  "nocomma": true,
+  "nonew": true,
+  "undef": true,
+  "globals": {
+    "ArrayBuffer": false,
+    "CryptoKey": false,
+    "Uint8Array": false,
+    "crypto": false,
+    "define": false
+  }
 }

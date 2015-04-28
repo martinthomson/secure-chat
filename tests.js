@@ -1,9 +1,10 @@
+/*global require:false */
 var deps = ['require', 'entity', 'policy',
             'roster', 'util', 'test'];
 require(deps, function(require) {
   'use strict';
 
-  var run = require('test').run;
+  var run_tests = require('test').run;
   var test = require('test').test;
   var assert = require('test').assert;
 
@@ -64,7 +65,7 @@ require(deps, function(require) {
     var allPolicies = policyOrder.concat([
       ['add'], ['add', 'remove'], ['remove'], ['member', 'remove']
     ].map(privs => new EntityPolicy(privs)));
-    return allPolicies.every((a, i) => {
+    return allPolicies.every(a => {
       return allPolicies.filter(b => b !== a)
         .every(b => EntityPolicy.ADMIN.canChange(a, b));
     });

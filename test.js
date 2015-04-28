@@ -1,3 +1,4 @@
+/*global document:false, console:false */
 define(['require', 'util'], function(require) {
   'use strict';
 
@@ -73,7 +74,6 @@ define(['require', 'util'], function(require) {
   };
   document.getElementById('test_run')
     .addEventListener('click', _ => run());
-  window.run_tests = run;
 
   var memcmp = (x, y) => util.bsEqual(x, y) && x;
   var assert = {

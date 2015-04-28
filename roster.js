@@ -439,7 +439,6 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         if (parser.remaining <= 0) {
           return;
         }
-        var start = parser.position;
         return this._decodeAndAdd(parser)
           .then(loadRemainingOperations);
       };
