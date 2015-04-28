@@ -216,11 +216,13 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       });
     },
 
+    /** Determines if this is the first entry. */
     _firstEntry: function(entry) {
       if (this._resolveIdentity) {
         // Note that we have to register this roster in the global registry
         // *before* resolving the identity; applications will use the resolution
-        // of identity as a signal to start using this identity.
+        // of identity as a signal to start using this roster and they need to
+        // be able to rely on a lookup succeeding when they do so..
         var gotId = this._resolveIdentity;
         delete this._resolveIdentity;
         allRosters.register(this, entry.actor)
@@ -230,6 +232,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       return false;
     },
 
+    /** Determines if the given change is acceptable. */
     _validateEntry: function(entry) {
       if (entry.opcode.equals(RosterOpcode.CHANGE)) {
         // If this is the first entry, no checks.
