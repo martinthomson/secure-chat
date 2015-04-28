@@ -73,6 +73,128 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
   }
 
   Roster.prototype = {
+
+    /** Find a cached entry for the given entity.  This will resolve
+     * successfully to undefined if there are no entries.  Note that while there
+     * is an outstanding write, this might not be up-to-date for affected
+     * entries.
+     */
+    find: function(entity) {
+      return cacheKey(entity).then(k => this.cache[k]);
+    },
+
+    /** Find the cached policy for the given entity.  This will resolve
+     * successfully with EntityPolicy.NONE if there are no entries. */
+    findPolicy: function(entity) {
+      return this.find(entity).then(v => v ? v.policy : EntityPolicy.NONE);
+    },
+
+    /** Find the cached share for the given entity.  This will resolve
+     * successfully with null if there are no entries. */
+    findShare: function(entity) {
+      return this.find(entity).then(v => v ? v.share : null);
+    },
+
+    /** Enact a change in policy for the subject, triggered by actor.  This will
+     * reject if the change is not permitted.
+     */
+    change: function(actor, subject, policy) {
+      return this._addEntry(new ChangeOperation(actor, subject, policy));
+    },
+
+    /** Add a share to this roster. */
+    share: function(actor) {
+      return this._addEntry(new ShareOperation(actor));
+    },
+
+    /** Returns a promise for an array of all the active members in the roster.
+     * That is, all those that have provided shares. */
+    allShares: function() {
+      return Promise.all(
+        Object.keys(this.cache)
+          .map(k => this.cache[k].share)
+          .filter(s => !!s)
+      );
+    },
+
+    encode: function() {
+      return util.bsConcat(this.log);
+    },
+
+    /** Decodes a sequence of entries and adds them to the log. */
+    decode: function(buf) {
+      var parser = new util.Parser(buf);
+      var loadRemainingOperations = _ => {
+        if (parser.remaining <= 0) {
+          return;
+        }
+        return this._decodeAndAdd(parser)
+          .then(loadRemainingOperations);
+      };
+      return loadRemainingOperations();
+    },
+
+    toJSON: function() {
+      return this.log.map(util.bsHex);
+    },
+
+    /** Determines if a given change in policy is permitted.  Note that this
+     * will give the wrong answer for changes to an actors own policy unless
+     * (actor === subject).
+     */
+    _canChange: function(actor, subject, proposed) {
+      // Find the existing policies for the two parties and see if this is OK.
+      return util.promiseDict({
+        actorId: actor.identity,
+        subjectId: subject.identity,
+        actorPolicy: this.findPolicy(actor),
+        oldPolicy: this.findPolicy(subject)
+      }).then(
+        result => {
+          // A member can always reduce their own capabilities.  But only if
+          // their old policy isn't already void (i.e., EntityPolicy.NONE).
+          if (util.bsEqual(result.actorId, result.subjectId)) {
+            return !EntityPolicy.NONE.subsumes(result.oldPolicy) &&
+              result.oldPolicy.subsumes(proposed);
+          }
+          return result.actorPolicy.canChange(result.oldPolicy, proposed);
+        }
+      );
+    },
+
+    /** Calls canChange and throws if it returns false. */
+    _checkChange: function(actor, subject, proposed) {
+      return this._canChange(actor, subject, proposed)
+        .then(ok => {
+          if (!ok) {
+            throw new Error('change forbidden');
+          }
+        });
+    },
+
+    /** Check that the addition of a roster is OK. */
+    _checkRosterChange: function(actor, actorRoster, subject, proposed) {
+      return Promise.all([
+        this._checkChange(actorRoster, subject, proposed),
+        actorRoster
+          .then(roster => roster.find(actor))
+          .then(found => {
+            if (!found) {
+              throw new Error('actor is not in advertised roster');
+            }
+          })
+      ]);
+    },
+
+    /** Basic check for membership */
+    _checkShare: function(actor) {
+      return this.findPolicy(actor).then(policy => {
+        if (!policy.member) {
+          throw new Error('not a member');
+        }
+      });
+    },
+
     /** Determines if the given change is acceptable. */
     _validateEntry: function(entry) {
       // If this is the first entry, no checks.  A share operation will cause
@@ -131,6 +253,38 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       ]);
     },
 
+    /** Appends an entry and returns the updated lastHash. */
+    _addEntry: function(entry, encoded) {
+      // This concurrently:
+      //  - encodes the new message and records it
+      //  - updates the cache of latest entries
+
+      // Only resolve that promise when both parts of the operation are
+      // complete.  That way, any attempt to add to the log (the official
+      // transcript) will be assured to get a valid cache state.
+
+      // We have to use the current value and don't await the value that is
+      // below, which would setup an unresolvable loop.
+      var savedHash = this.lastHash;
+      var p = this._validateEntry(entry)
+          .then(_ => util.promiseDict({
+            logEntry: Promise.resolve(encoded || entry.encode(savedHash)),
+            cacheKey: cacheKey(entry.subject)
+          })).then(r => {
+            this.log.push(r.logEntry);
+            this._updateCacheEntry(r.cacheKey, entry);
+            return r.logEntry;
+          });
+
+      // A lot of the operations that follow depend on knowing the hash of this
+      // newly added log entry.  This sets the promise that calculates this
+      // value, but doesn't await it.
+      this.lastHash = p.then(rawEntry => c.digest(HASH, rawEntry));
+      // Set the roster identity, again asynchronously.
+      p.then(_ => this._firstEntry(entry));
+      return p.then(_ => null);
+    },
+
     /** Decode the buffer into an operation and add it to the log. This rejects
      * if the entry isn't valid.
      */
@@ -180,159 +334,6 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
         (p, buf) => p.then(_ => this._decodeAndAdd(new util.Parser(buf))),
         Promise.resolve()
       );
-    },
-
-    /** Find a cached entry for the given entity.  This will resolve
-     * successfully to undefined if there are no entries.  Note that while there
-     * is an outstanding write, this might not be up-to-date for affected
-     * entries.
-     */
-    find: function(entity) {
-      return cacheKey(entity).then(k => this.cache[k]);
-    },
-
-    /** Find the cached policy for the given entity.  This will resolve
-     * successfully with EntityPolicy.NONE if there are no entries. */
-    findPolicy: function(entity) {
-      return this.find(entity).then(v => v ? v.policy : EntityPolicy.NONE);
-    },
-
-    /** Find the cached share for the given entity.  This will resolve
-     * successfully with null if there are no entries. */
-    findShare: function(entity) {
-      return this.find(entity).then(v => v ? v.share : null);
-    },
-
-    /** Determines if a given change in policy is permitted.  Note that this
-     * will give the wrong answer for changes to an actors own policy unless
-     * (actor === subject).
-     */
-    canChange: function(actor, subject, proposed) {
-      if (actor === subject) {
-        // A member can always reduce their own capabilities.  But only if their
-        // old policy isn't already void (i.e., EntityPolicy.NONE).
-        return this.findPolicy(actor)
-          .then(oldPolicy =>
-                !EntityPolicy.NONE.subsumes(oldPolicy) &&
-                oldPolicy.subsumes(proposed));
-      }
-
-      // Find the existing policies for the two parties and see if this is OK.
-      return util.promiseDict({
-        actor: this.findPolicy(actor),
-        subject: this.findPolicy(subject)
-      }).then(
-        policies => policies.actor.canChange(policies.subject, proposed)
-      );
-    },
-
-    /** Calls canChange and throws if it returns false. */
-    _checkChange: function(actor, subject, proposed) {
-      return this.canChange(actor, subject, proposed)
-        .then(ok => {
-          if (!ok) {
-            throw new Error('change forbidden');
-          }
-        });
-    },
-
-    /** Check that the addition of a roster is OK. */
-    _checkRosterChange: function(actor, actorRoster, subject, proposed) {
-      return Promise.all([
-        this._checkChange(actorRoster, subject, proposed),
-        actorRoster
-          .then(roster => roster.find(actor))
-          .then(found => {
-            if (!found) {
-              throw new Error('actor is not in advertised roster');
-            }
-          })
-      ]);
-    },
-
-    /** Appends an entry and returns the updated lastHash. */
-    _addEntry: function(entry, encoded) {
-      // This concurrently:
-      //  - encodes the new message and records it
-      //  - updates the cache of latest entries
-
-      // Only resolve that promise when both parts of the operation are
-      // complete.  That way, any attempt to add to the log (the official
-      // transcript) will be assured to get a valid cache state.
-
-      // We have to use the current value and don't await the value that is
-      // below, which would setup an unresolvable loop.
-      var savedHash = this.lastHash;
-      var p = this._validateEntry(entry)
-          .then(_ => util.promiseDict({
-            logEntry: Promise.resolve(encoded || entry.encode(savedHash))
-              .then(bits => {
-                this.log.push(bits);
-                return bits;
-              }),
-            cacheUpdate: cacheKey(entry.subject)
-              .then(key => this._updateCacheEntry(key, entry))
-          }));
-
-      // A lot of the operations that follow depend on knowing the hash of this
-      // newly added log entry.  This sets the promise that calculates this
-      // value, but doesn't await it.
-      this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
-      // Set the roster identity, again asynchronously.
-      p.then(_ => this._firstEntry(entry));
-      return p.then(_ => null);
-    },
-
-    /** Enact a change in policy for the subject, triggered by actor.  This will
-     * reject if the change is not permitted.
-     */
-    change: function(actor, subject, policy) {
-      return this._addEntry(new ChangeOperation(actor, subject, policy));
-    },
-
-    /** Basic check for membership */
-    _checkShare: function(actor) {
-      return this.findPolicy(actor).then(policy => {
-        if (!policy.member) {
-          throw new Error('not a member');
-        }
-      });
-    },
-
-    /** Add a share to this roster. */
-    share: function(actor) {
-      return this._addEntry(new ShareOperation(actor));
-    },
-
-    /** Returns a promise for an array of all the active members in the roster.
-     * That is, all those that have provided shares. */
-    allShares: function() {
-      return Promise.all(
-        Object.keys(this.cache)
-          .map(k => this.cache[k].share)
-          .filter(s => !!s)
-      );
-    },
-
-    encode: function() {
-      return util.bsConcat(this.log);
-    },
-
-    /** Decodes a sequence of entries and adds them to the log. */
-    decode: function(buf) {
-      var parser = new util.Parser(buf);
-      var loadRemainingOperations = _ => {
-        if (parser.remaining <= 0) {
-          return;
-        }
-        return this._decodeAndAdd(parser)
-          .then(loadRemainingOperations);
-      };
-      return loadRemainingOperations();
-    },
-
-    toJSON: function() {
-      return this.log.map(util.bsHex);
     }
   };
 

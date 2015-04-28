@@ -111,14 +111,13 @@ require(deps, function(require) {
       })).then(ids => assert.memcmp(ids.found, ids.user));
   });
   test('creator can leave', _ => {
-    return Roster.create(user)
-      .then(roster => roster.canChange(user, user, EntityPolicy.NONE))
-      .then(assert.ok);
+    return Roster.create(creator)
+      .then(roster => roster.change(creator, creator, EntityPolicy.NONE));
   });
   test('creator can\'t remove first user', _ => {
     return Roster.create(creator, user)
-      .then(roster => roster.canChange(creator, user, EntityPolicy.NONE))
-      .then(assert.notok);
+      .then(roster => roster.change(creator, user, EntityPolicy.NONE))
+      .then(_ => assert.fail('should not succeed'),_ => true);
   });
   test('policy default is admin', _ => {
     return Roster.create(user)

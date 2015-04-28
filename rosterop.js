@@ -31,11 +31,11 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     this.actor = actor;
   }
 
-  /** Encodes this.  This takes a promise to the hash of the previous entry. */
   RosterOperation.prototype = {
     _encodeParts: function() {
       throw new Error('not implemented');
     },
+    /** Encodes this.  This takes a promise to the hash of the previous entry. */
     encode: function(lastEntryHash) {
       var pieces = [].concat(
         this.opcode.encode(),
