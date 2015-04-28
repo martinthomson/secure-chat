@@ -87,7 +87,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }
   ShareOperation.prototype = Object.create(RosterOperation.prototype);
   ShareOperation.prototype._encodeParts = function() {
-    return [ this.subject.share ];
+    return [ this.subject.encodeShare() ];
   };
 
   // Calculate some lengths based on the same principle: generate a real value
@@ -205,7 +205,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
-     * rejects if the entry isn't valid (see RosterEntry.decode).  */
+     * rejects if the entry isn't valid (see RosterEntry.decode). */
     _updateEncodedCacheEntry: function(parser) {
       var start = parser.position;
       return RosterOperation.decode(parser, this.lastHash)

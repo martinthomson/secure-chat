@@ -53,16 +53,20 @@ define(['require', 'util'], function(require) {
 
     /** Returns a promise with the raw ECDH share. Reject is there is none. */
     get share() {
+      return this.ecdhPublic;
+    },
+
+    set share(pub) {
+      this.ecdhPublic = importPublicKey(pub, ECDH, ['deriveBits']);
+    },
+
+    encodeShare: function() {
       if (!this.ecdhPublic) {
         return null;
       }
       return this.ecdhPublic
         .then(key => c.exportKey('spki', key))
         .then(spki => new Uint8Array(spki, SPKI_PREFIX.length));
-    },
-
-    set share(pub) {
-      this.ecdhPublic = importPublicKey(pub, ECDH, ['deriveBits']);
     }
   };
 
@@ -86,6 +90,10 @@ define(['require', 'util'], function(require) {
     },
 
     get share() {
+      return this.ecdhKey.then(pair => pair.publicKey);
+    },
+
+    encodeShare: function() {
       return this.ecdhKey
         .then(pair => c.exportKey('spki', pair.publicKey))
         .then(spki => new Uint8Array(spki, SPKI_PREFIX.length));
@@ -117,7 +125,7 @@ define(['require', 'util'], function(require) {
     var dummyEntity = new Entity();
     return util.promiseDict({
       identifier: dummyEntity.identity.then(x => x.byteLength),
-      share: dummyEntity.share.then(x => x.byteLength),
+      share: dummyEntity.encodeShare().then(x => x.byteLength),
       signature: dummyEntity.sign(new Uint8Array(1)).then(x => x.byteLength)
     });
   }());
