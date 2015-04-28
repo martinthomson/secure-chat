@@ -87,11 +87,11 @@ define(['require', 'util'], function(require) {
     if ((v >>> 6) !== 0) {
       throw new Error('unsupported policy version');
     }
-    return util.mergeDict([{
+    return util.mergeDict({
       member: !!(v & 1 << 0),
       add: !!(v & (1 << 1)),
       remove: !!(v & (1 << 2))
-    }], new EntityPolicy([]));
+    }, new EntityPolicy([]));
   };
 
   EntityPolicy.ADMIN = new EntityPolicy(['member', 'add', 'remove']);

@@ -96,7 +96,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   RosterOperation.lengths = (function() {
     return PublicEntity.lengths.then(
       entityLengths => util.promiseDict(
-        util.mergeDict([entityLengths], {
+        util.mergeDict(entityLengths, {
           opcode: RosterOpcode.CHANGE.encode().byteLength,
           policy: EntityPolicy.NONE.encode().byteLength,
           hash: allZeroHash.then(x => x.byteLength)
@@ -104,7 +104,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     );
   }());
 
-  RosterOperation._decodeOperation = function(parser, lengths) {
+  RosterOperation.decode = function(parser, lengths) {
     var opcode = RosterOpcode.decode(parser.next(lengths.opcode));
 
     if (opcode.equals(RosterOpcode.CHANGE)) {
@@ -159,26 +159,23 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
   Roster.prototype = {
     /** Enacts the change in `entry` on the cache. */
-    _updateCacheEntry: function(entry) {
-      return CacheEntry.key(entry.subject)
-        .then(k => {
-          if (entry.opcode.equals(RosterOpcode.CHANGE)) {
-            if (!this.cache[k]) {
-              this.cache[k] = new CacheEntry(entry.subject, entry.policy);
-            } else if (entry.policy.member) {
-              this.cache[k].policy = entry.policy;
-            } else {
-              delete this.cache[k];
-            }
-          } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
-            if (!this.cache[k]) {
-              throw new Error('not a member');
-            }
-            this.cache[k].share = entry.subject.share;
-          } else {
-            throw new Error('invalid operation');
-          }
-        });
+    _updateCacheEntry: function(k, entry) {
+      if (entry.opcode.equals(RosterOpcode.CHANGE)) {
+        if (!this.cache[k]) {
+          this.cache[k] = new CacheEntry(entry.subject, entry.policy);
+        } else if (entry.policy.member) {
+          this.cache[k].policy = entry.policy;
+        } else {
+          delete this.cache[k];
+        }
+      } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
+        if (!this.cache[k]) {
+          throw new Error('not a member');
+        }
+        this.cache[k].share = entry.subject.share;
+      } else {
+        throw new Error('invalid operation');
+      }
     },
 
     /** Check that the hash and signature on an entry is valid. */
@@ -208,7 +205,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       return RosterOperation.lengths.then(lengths => {
         var startPosition = parser.position;
 
-        var op = RosterOperation._decodeOperation(parser, lengths);
+        var op = RosterOperation.decode(parser, lengths);
 
         var hash = parser.next(lengths.hash);
         var signedMessage = parser.range(startPosition, parser.position);
@@ -233,6 +230,20 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       return false;
     },
 
+    _validateEntry: function(entry) {
+      if (entry.opcode.equals(RosterOpcode.CHANGE)) {
+        // If this is the first entry, no checks.
+        if (this._firstEntry(entry)) {
+          return Promise.resolve();
+        }
+        return this._checkChange(entry.actor, entry.subject, entry.policy);
+      }
+      if (entry.opcode.equals(RosterOpcode.SHARE)) {
+        return this._checkShare(entry.subject);
+      }
+      throw new Error('invalid opcode');
+    },
+
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
      * rejects if the entry isn't valid (see RosterEntry.decode). */
@@ -241,19 +252,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       return this._decodeEntry(parser)
         .then(entry => {
           var encoded = parser.range(start, parser.position);
-          var check = Promise.resolve();
-
-          if (entry.opcode.equals(RosterOpcode.CHANGE)) {
-            // If this is the first entry, we treat it specially.
-            if (!this._firstEntry(entry)) {
-              check = this._checkChange(entry.actor, entry.subject, entry.policy);
-            }
-          } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
-            check = this._checkShare(entry.subject);
-          } else {
-            throw new Error('invalid opcode');
-          }
-          return check.then(_ => this._addEntry(entry, encoded));
+          return this._validateEntry(entry)
+            .then(_ => this._addEntry(entry, encoded));
         });
     },
 
@@ -316,6 +316,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         policies => policies.actor.canChange(policies.subject, proposed)
       );
     },
+
     /** Calls canChange and throws if it returns false. */
     _checkChange: function(actor, subject, proposed) {
       return this.canChange(actor, subject, proposed)
@@ -345,7 +346,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
             this.log.push(bits);
             return bits;
           }),
-        cacheUpdate: this._updateCacheEntry(entry)
+        cacheUpdate: CacheEntry.key(entry.subject)
+          .then(key => this._updateCacheEntry(key, entry))
       });
       // Update the hash, but asynchronously: don't await it.
       this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
@@ -410,8 +412,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   };
 
   /**
-   * Creates a new roster.  Only the creator option is mandatory here.  By
-   * default, the creator adds them selves; by default the policy is
+   * Creates a new agent roster.  Only the creator option is mandatory here.  By
+   * default, the creator adds themself; by default the policy is
    * EntityPolicy.ADMIN.  If the creator adds themself, this also adds their
    * share to the log.
    */
@@ -434,10 +436,11 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     Roster.call(this, log);
   }
   UserRoster.prototype = Object.create(Roster.prototype);
-  UserRoster.prototype._checkShare = function() {
+  util.mergeDict({
+    _checkShare: function() {
     throw new Error('no shares on user roster');
-  };
-
+    }
+  }, UserRoster.prototype);
 
   return {
     Roster: Roster,
