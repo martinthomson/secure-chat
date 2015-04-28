@@ -8,12 +8,15 @@ define(['require', 'util'], function(require) {
   const ECDSA_KEY = { name: 'ECDSA', namedCurve: CURVE };
   const ECDSA_SIGN = { name: 'ECDSA', hash: 'SHA-256' };
   const ECDH = { name: 'ECDH', namedCurve: CURVE };
-  // These identify P-256, which we need until we support 'raw'
+  // These identify P-256, which we need to create SPKI until Firefox supports
+  // 'raw' importKey and exportKey.
   const SPKI_PREFIX = new Uint8Array([
     48, 86, 48, 16, 6, 4, 43, 129, 4, 112, 6, 8,
     42, 134, 72, 206, 61, 3, 1, 7, 3, 66, 0
   ]);
 
+  /** A flexible import function that takes a BufferSource, a CryptoKey, or a
+   * promise for either and imports it. */
   function importPublicKey(pub, alg, usages) {
     return Promise.resolve(pub).then(pubKey => {
       if (pubKey instanceof CryptoKey) {
