@@ -200,6 +200,15 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       });
     },
 
+    _firstEntry: function(entry) {
+      if (this._resolveIdentity) {
+        this._resolveIdentity(entry.actor.identity);
+        delete this._resolveIdentity;
+        return true;
+      }
+      return false;
+    },
+
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
      * rejects if the entry isn't valid (see RosterEntry.decode). */
@@ -211,12 +220,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
           var check = Promise.resolve();
 
           if (entry.opcode.equals(RosterOpcode.CHANGE)) {
-            // If we haven't established an identity, then we need to do so.
-            if (this._resolveIdentity) {
-              this._resolveIdentity(entry.actor.identity);
-              delete this._resolveIdentity;
-              check = this.identity;
-            } else {
+            // If this is the first entry, we treat it specially.
+            if (!this._firstEntry(entry)) {
               check = this._checkChange(entry.actor, entry.subject, entry.policy);
             }
           } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
@@ -321,12 +326,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       // Update the hash, but asynchronously: don't await it.
       this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
       // Set the roster identity, again asynchronously.
-      p.then(_ => {
-        if (this._resolveIdentity) {
-          this._resolveIdentity(entry.actor.identity);
-          delete this._resolveIdentity;
-        }
-      });
+      p.then(_ => this._firstEntry(entry));
       return p.then(_ => null);
     },
 
