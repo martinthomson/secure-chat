@@ -27,9 +27,9 @@ define(['require'], function(require) {
   /** Produce a hex string with the given separator. */
   function bsHex(a, sep) {
     return new Uint8Array(a)
-      .join(' ').split(' ')
-      .map(x => parseInt(x, 10))
-      .map(x => ((x < 16) ? '0' : '') + x.toString(16))
+      .join(' ').split(' ') // Convert from Uint8Array to Array.
+      .map(x => parseInt(x, 10) + 0x100)
+      .map(x => x.toString(16).slice(1))
       .join(sep || '');
   }
 
