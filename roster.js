@@ -15,6 +15,32 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     return h;
   });
 
+  /** A simple helper that determines the cache key for any entity with an
+   * identity. */
+  function cacheKey(entity) {
+    return Promise.resolve(entity)
+      .then(e => e.identity)
+      .then(id => util.base64url.encode(id));
+  }
+
+  /** A simple store for rosters. */
+  function AllRosters() {
+    this.rosters = {};
+  }
+  AllRosters.prototype = {
+    /** Register a roster.  This takes a second argument, the creator of the
+     * roster for the case of self-registration of a roster.  That happens prior
+     * to the identity of the roster being confirmed. */
+    register: function(roster, creator) {
+      return cacheKey(creator || roster)
+        .then(k => this.rosters[k] = roster)
+    },
+    lookup: function(entity) {
+      return cacheKey(entity).then(k => this.rosters[k])
+    }
+  };
+  var allRosters = new AllRosters();
+
   function RosterOpcode(op) {
     this.opcode = op;
   }
@@ -92,10 +118,10 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
    * they are acting for. The roster is used to determine whether the action is
    * permitted. The actor is used to provide the signing public key; the actor
    * also needs to be a member on the roster. */
-  function RosterChangeOperation(actor, roster, subject, policy) {
+  function RosterChangeOperation(actor, actorRoster, subject, policy) {
     ChangeOperation.call(this, actor, subject, policy);
     this.opcode = RosterOpcode.CHANGE_ROSTER;
-    this.roster = roster;
+    this.actorRoster = actorRoster;
   }
   RosterChangeOperation.prototype = util.mergeDict({
     _encodeParts: function() {
@@ -131,6 +157,13 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       var actor = new PublicEntity(parser.next(lengths.identifier), share);
       return new ShareOperation(actor);
     }
+    if (opcode.equals(RosterOpcode.CHANGE_ROSTER)) {
+      var subject = allRosters.lookup(parser.next(lengths.identifier));
+      var policy = EntityPolicy.decode(parser.next(lengths.policy));
+      var actor = new PublicEntity(parser.next(lengths.identifier));
+      var actorRoster = allRosters.lookup(parser.next(lengths.identifier));
+      return new RosterChangeOperation(actor, actorRoster, subject, policy);
+    }
     throw new Error('invalid operation: ' + opcode.opcode);
   };
 
@@ -140,29 +173,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     this.policy = policy;
   }
   CacheEntry.prototype = Object.create(PublicEntity.prototype);
-  /** A simple helper that determines the cache key for any entity with an
-   * identity. */
-  CacheEntry.key = function(entity) {
-    return entity.identity.then(id => util.base64url.encode(id));
-  };
 
-
-  function AllRosters() {
-    this.rosters = {};
-  }
-  AllRosters.prototype = {
-    /** Register a roster.  This takes a second argument, the creator of the
-     * roster for the case of self-registration of a roster.  That happens prior
-     * to the identity of the roster being confirmed. */
-    register: function(roster, creator) {
-      return CacheEntry.key(creator || roster)
-        .then(k => this.rosters[k] = roster)
-    },
-    lookup: function(entity) {
-      return CacheEntry.key(entity).then(k => this.rosters[k])
-    }
-  };
-  var allRosters = new AllRosters();
 
   /** Creates a roster. */
   function Roster() {
@@ -279,7 +290,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
      * entries.
      */
     find: function(entity) {
-      return CacheEntry.key(entity).then(k => this.cache[k]);
+      return cacheKey(entity).then(k => this.cache[k]);
     },
 
     /** Find the cached policy for the given entity.  This will resolve
@@ -347,7 +358,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
                 this.log.push(bits);
                 return bits;
               }),
-            cacheUpdate: CacheEntry.key(entry.subject)
+            cacheUpdate: cacheKey(entry.subject)
               .then(key => this._updateCacheEntry(key, entry))
           }));
 
