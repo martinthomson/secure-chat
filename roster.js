@@ -32,41 +32,37 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   };
   RosterOpcode.CHANGE = new RosterOpcode(0);
   RosterOpcode.SHARE = new RosterOpcode(1);
+  RosterOpcode.CHANGE = new RosterOpcode(2);
 
   /**
-   * Create a new roster entry.
-   *
-   * Takes a dictionary of values:
-   *
-   * operation: the RosterOpcode to use
-   * for CHANGE, this also must include:
-   * - policy: the new EntityPolicy to apply.
-   * - subject: the entity that is being changed; a PublicEntity or Entity.
-   * for SHARE, the actor is enough.
-   *
-   * actor the entity generating the entry; an Entity.
+   * The base implementation of an operation on the roster.
    */
   function RosterOperation(actor) {
     this.actor = actor;
   }
 
   /** Encodes this.  This takes a promise to the hash of the previous entry. */
-  RosterOperation.prototype.encode = function(lastEntryHash) {
-    var pieces = [].concat(
-      this.opcode.encode(),
-      this._encodeParts(),
-      this.actor.identity,
-      lastEntryHash
-    );
+  RosterOperation.prototype = {
+    _encodeParts: function() {
+      throw new Error('not implemented');
+    },
+    encode: function(lastEntryHash) {
+      var pieces = [].concat(
+        this.opcode.encode(),
+        this._encodeParts(),
+        this.actor.identity,
+        lastEntryHash
+      );
 
-    return Promise.all(pieces)
-      .then(encodedPieces => {
-        var msg = util.bsConcat(encodedPieces);
-        return this.actor.sign(msg)
-          .then(sig => {
-            return util.bsConcat([msg, sig]);
-          })
-      });
+      return Promise.all(pieces)
+        .then(encodedPieces => {
+          var msg = util.bsConcat(encodedPieces);
+          return this.actor.sign(msg)
+            .then(sig => {
+              return util.bsConcat([msg, sig]);
+            })
+        });
+    }
   };
 
   function ChangeOperation(actor, subject, policy) {
@@ -75,20 +71,37 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     this.subject = subject;
     this.policy = policy;
   }
-  ChangeOperation.prototype = Object.create(RosterOperation.prototype);
-  ChangeOperation.prototype._encodeParts = function() {
-    return [ this.subject.identity, this.policy.encode() ];
-  };
+  ChangeOperation.prototype = util.mergeDict({
+    _encodeParts: function() {
+      return [ this.subject.identity, this.policy.encode() ];
+    }
+  }, Object.create(RosterOperation.prototype));
 
   function ShareOperation(actor) {
     RosterOperation.call(this, actor);
     this.opcode = RosterOpcode.SHARE;
     this.subject = actor;
   }
-  ShareOperation.prototype = Object.create(RosterOperation.prototype);
-  ShareOperation.prototype._encodeParts = function() {
-    return [ this.subject.encodeShare() ];
-  };
+  ShareOperation.prototype = util.mergeDict({
+    _encodeParts: function() {
+      return [ this.subject.encodeShare() ];
+    }
+  }, Object.create(RosterOperation.prototype));
+
+  /** For a user roster, changes need to identify the actor AND the roster that
+   * they are acting for. The roster is used to determine whether the action is
+   * permitted. The actor is used to provide the signing public key; the actor
+   * also needs to be a member on the roster. */
+  function RosterChangeOperation(actor, roster, subject, policy) {
+    ChangeOperation.call(this, actor, subject, policy);
+    this.opcode = RosterOpcode.CHANGE_ROSTER;
+    this.roster = roster;
+  }
+  RosterChangeOperation.prototype = util.mergeDict({
+    _encodeParts: function() {
+      return [ this.subject.encodeShare(), this.roster.encodeShare() ];
+    }
+  }, Object.create(ChangeOperation.prototype));
 
   // Calculate some lengths based on the same principle: generate a real value
   // and work out how big it is.  When the algorithm details are nailed down,
@@ -158,6 +171,21 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }
 
   Roster.prototype = {
+    /** Determines if the given change is acceptable. */
+    _validateEntry: function(entry) {
+      if (entry.opcode.equals(RosterOpcode.CHANGE)) {
+        // If this is the first entry, no checks.
+        if (this._resolveIdentity) {
+          return Promise.resolve();
+        }
+        return this._checkChange(entry.actor, entry.subject, entry.policy);
+      }
+      if (entry.opcode.equals(RosterOpcode.SHARE)) {
+        return this._checkShare(entry.subject);
+      }
+      throw new Error('invalid opcode');
+    },
+
     /** Enacts the change in `entry` on the cache. */
     _updateCacheEntry: function(k, entry) {
       if (entry.opcode.equals(RosterOpcode.CHANGE)) {
@@ -195,16 +223,12 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       ]);
     },
 
-    /** Decode the buffer into an entry.  Note that this produces a RosterEntry
-     * that can't be used with encode.  This rejects if the entry isn't valid.
-     *
-     * @parser is the parser that will
-     * @lastHash is a promise for a hash of the last message.
+    /** Decode the buffer into an operation and add it to the log. This rejects
+     * if the entry isn't valid.
      */
-    _decodeEntry: function(parser) {
+    _decodeAndAdd: function(parser) {
+      var startPosition = parser.position;
       return RosterOperation.lengths.then(lengths => {
-        var startPosition = parser.position;
-
         var op = RosterOperation.decode(parser, lengths);
 
         var hash = parser.next(lengths.hash);
@@ -212,8 +236,11 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         var signature = parser.next(lengths.signature);
 
         return this._checkHashAndSig(op.actor, hash, signedMessage, signature)
-          .then(_ => op);
-      });
+          .then(_ => {
+            var encoded = parser.range(startPosition, parser.position);
+            return this._addEntry(op, encoded);
+          });
+      })
     },
 
     /** Determines if this is the first entry. */
@@ -222,7 +249,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         // Note that we have to register this roster in the global registry
         // *before* resolving the identity; applications will use the resolution
         // of identity as a signal to start using this roster and they need to
-        // be able to rely on a lookup succeeding when they do so..
+        // be able to rely on a lookup succeeding when they do so.
         var gotId = this._resolveIdentity;
         delete this._resolveIdentity;
         allRosters.register(this, entry.actor)
@@ -230,34 +257,6 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         return true;
       }
       return false;
-    },
-
-    /** Determines if the given change is acceptable. */
-    _validateEntry: function(entry) {
-      if (entry.opcode.equals(RosterOpcode.CHANGE)) {
-        // If this is the first entry, no checks.
-        if (this._firstEntry(entry)) {
-          return Promise.resolve();
-        }
-        return this._checkChange(entry.actor, entry.subject, entry.policy);
-      }
-      if (entry.opcode.equals(RosterOpcode.SHARE)) {
-        return this._checkShare(entry.subject);
-      }
-      throw new Error('invalid opcode');
-    },
-
-    /** Takes an encoded entry (ebuf) and a promise for the hash of the last
-     * message (lastHash) and updates the cache based on that information.  This
-     * rejects if the entry isn't valid (see RosterEntry.decode). */
-    _updateEncodedCacheEntry: function(parser) {
-      var start = parser.position;
-      return this._decodeEntry(parser)
-        .then(entry => {
-          var encoded = parser.range(start, parser.position);
-          return this._validateEntry(entry)
-            .then(_ => this._addEntry(entry, encoded));
-        });
     },
 
     /** Updates all entries in the cache based on the entire transcript. It
@@ -269,9 +268,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       this.identity = new Promise(r => this._resolveIdentity = r);
 
       return this.log.reduce(
-        (prev, ebuf) => prev.then(
-          _ => this._updateEncodedCacheEntry(new util.Parser(ebuf))
-        ),
+        (p, buf) => p.then(_ => this._decodeAndAdd(new util.Parser(buf))),
         Promise.resolve()
       );
     },
@@ -340,19 +337,23 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       // complete.  That way, any attempt to add to the log (the official
       // transcript) will be assured to get a valid cache state.
 
+      // We have to use the current value and don't await the value that is
+      // below, which would setup an unresolvable loop.
+      var savedHash = this.lastHash;
+      var p = this._validateEntry(entry)
+          .then(_ => util.promiseDict({
+            logEntry: Promise.resolve(encoded || entry.encode(savedHash))
+              .then(bits => {
+                this.log.push(bits);
+                return bits;
+              }),
+            cacheUpdate: CacheEntry.key(entry.subject)
+              .then(key => this._updateCacheEntry(key, entry))
+          }));
+
       // A lot of the operations that follow depend on knowing the hash of this
       // newly added log entry.  This sets the promise that calculates this
       // value, but doesn't await it.
-      var p = util.promiseDict({
-        logEntry: Promise.resolve(encoded || entry.encode(this.lastHash))
-          .then(bits => {
-            this.log.push(bits);
-            return bits;
-          }),
-        cacheUpdate: CacheEntry.key(entry.subject)
-          .then(key => this._updateCacheEntry(key, entry))
-      });
-      // Update the hash, but asynchronously: don't await it.
       this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
       // Set the roster identity, again asynchronously.
       p.then(_ => this._firstEntry(entry));
@@ -363,8 +364,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
      * reject if the change is not permitted.
      */
     change: function(actor, subject, policy) {
-      return this._checkChange(actor, subject, policy)
-        .then(_ => this._addEntry(new ChangeOperation(actor, subject, policy)));
+      return this._addEntry(new ChangeOperation(actor, subject, policy));
     },
 
     /** Basic check for membership */
@@ -378,8 +378,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
 
     /** Add a share to this roster. */
     share: function(actor) {
-      return this._checkShare(actor)
-        .then(_ => this._addEntry(new ShareOperation(actor)));
+      return this._addEntry(new ShareOperation(actor));
     },
 
     /** Returns a promise for an array of all the active members in the roster.
@@ -403,7 +402,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         if (parser.remaining <= 0) {
           return;
         }
-        return this._updateEncodedCacheEntry(parser)
+        var start = parser.position;
+        return this._decodeAndAdd(parser)
           .then(loadRemainingOperations);
       };
       return loadRemainingOperations();
@@ -427,8 +427,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       throw new Error('first entry must have "member" and "add" privileges');
     }
 
-    var roster = new Roster([]);
-    var p = roster._addEntry(new ChangeOperation(actor, subject, policy));
+    var roster = new Roster();
+    var p = roster.change(actor, subject, policy);
     if (actor === subject) {
       p = p.then(_ => roster.share(actor));
     }
@@ -441,7 +441,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   UserRoster.prototype = Object.create(Roster.prototype);
   util.mergeDict({
     _checkShare: function() {
-    throw new Error('no shares on user roster');
+      throw new Error('no shares on user roster');
     }
   }, UserRoster.prototype);
 
