@@ -121,53 +121,17 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     throw new Error('invalid operation: ' + opcode.opcode);
   };
 
-  RosterOperation._checkHashAndSig = function(actor, lastHash, hash,
-                                              signed, signature) {
-    return Promise.all([
-      actor.verify(signature, signed)
-        .then(ok => {
-          if (!ok) {
-            throw new Error('invalid signature on entry');
-          }
-        }),
-      lastHash.then(h => {
-        if (!util.bsEqual(h, hash)) {
-          throw new Error('invalid hash in entry');
-        }
-      })
-    ]);
-  };
-
-  /** Decode the buffer into an entry.  Note that this produces a RosterEntry
-   * that can't be used with encode.  This rejects if the entry isn't valid.
-   *
-   * @parser is the parser that will
-   * @lastHash is a promise for a hash of the last message (which will be turned
-   *           into the all zero value if omitted).
-   */
-  RosterOperation.decode = function(parser, lastHash) {
-    return RosterOperation.lengths.then(lengths => {
-      var startPosition = parser.position;
-
-      var op = RosterOperation._decodeOperation(parser, lengths);
-
-      var hash = parser.next(lengths.hash);
-      var signedMessage = parser.range(startPosition, parser.position);
-      var signature = parser.next(lengths.signature);
-
-      return RosterOperation._checkHashAndSig(
-        op.actor, lastHash, hash,
-        signedMessage, signature
-      ).then(_ => op);
-    });
-  };
-
   /** Used internally by the roster to track the status of entities in the roster */
   function CacheEntry(subject, policy) {
     PublicEntity.call(this, subject.identity, subject.share);
     this.policy = policy;
   }
   CacheEntry.prototype = Object.create(PublicEntity.prototype);
+  /** A simple helper that determines the cache key for any entity with an
+   * identity. */
+  CacheEntry.key = function(entity) {
+    return entity.identity.then(id => util.base64url.encode(id));
+  };
 
   function Roster(log) {
     this.log = [].concat(log);
@@ -175,14 +139,9 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }
 
   Roster.prototype = {
-    /** A simple helper that determines the cache key for an entity. */
-    _cacheKey: function(entity) {
-      return entity.identity.then(id => util.base64url.encode(id));
-    },
-
     /** Enacts the change in `entry` on the cache. */
     _updateCacheEntry: function(entry) {
-      return this._cacheKey(entry.subject)
+      return CacheEntry.key(entry.subject)
         .then(k => {
           if (entry.opcode.equals(RosterOpcode.CHANGE)) {
             if (!this.cache[k]) {
@@ -203,20 +162,61 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
         });
     },
 
+    /** Check that the hash and signature on an entry is valid. */
+    _checkHashAndSig: function(actor, hash, signed, signature) {
+      return Promise.all([
+        actor.verify(signature, signed)
+          .then(ok => {
+            if (!ok) {
+              throw new Error('invalid signature on entry');
+            }
+          }),
+        this.lastHash.then(h => {
+          if (!util.bsEqual(h, hash)) {
+            throw new Error('invalid hash in entry');
+          }
+        })
+      ]);
+    },
+
+    /** Decode the buffer into an entry.  Note that this produces a RosterEntry
+     * that can't be used with encode.  This rejects if the entry isn't valid.
+     *
+     * @parser is the parser that will
+     * @lastHash is a promise for a hash of the last message.
+     */
+    _decodeEntry: function(parser) {
+      return RosterOperation.lengths.then(lengths => {
+        var startPosition = parser.position;
+
+        var op = RosterOperation._decodeOperation(parser, lengths);
+
+        var hash = parser.next(lengths.hash);
+        var signedMessage = parser.range(startPosition, parser.position);
+        var signature = parser.next(lengths.signature);
+
+        return this._checkHashAndSig(op.actor, hash, signedMessage, signature)
+          .then(_ => op);
+      });
+    },
+
     /** Takes an encoded entry (ebuf) and a promise for the hash of the last
      * message (lastHash) and updates the cache based on that information.  This
      * rejects if the entry isn't valid (see RosterEntry.decode). */
     _updateEncodedCacheEntry: function(parser) {
       var start = parser.position;
-      return RosterOperation.decode(parser, this.lastHash)
+      return this._decodeEntry(parser)
         .then(entry => {
           var encoded = parser.range(start, parser.position);
           var check = Promise.resolve();
 
           if (entry.opcode.equals(RosterOpcode.CHANGE)) {
-            // If previousHash is allZeroHash, then the entry is the first and
-            // the change is automatically permitted.  Otherwise, check.
-            if (this.lastHash !== allZeroHash) {
+            // If we haven't established an identity, then we need to do so.
+            if (this._resolveIdentity) {
+              this._resolveIdentity(entry.actor.identity);
+              delete this._resolveIdentity;
+              check = this.identity;
+            } else {
               check = this._checkChange(entry.actor, entry.subject, entry.policy);
             }
           } else if (entry.opcode.equals(RosterOpcode.SHARE)) {
@@ -234,6 +234,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       // Reset cache state.
       this.cache = {};
       this.lastHash = allZeroHash;
+      this.identity = new Promise(r => this._resolveIdentity = r);
 
       return this.log.reduce(
         (prev, ebuf) => prev.then(
@@ -249,7 +250,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
      * entries.
      */
     find: function(entity) {
-      return this._cacheKey(entity).then(k => this.cache[k]);
+      return CacheEntry.key(entity).then(k => this.cache[k]);
     },
 
     /** Find the cached policy for the given entity.  This will resolve
@@ -319,6 +320,13 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       });
       // Update the hash, but asynchronously: don't await it.
       this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
+      // Set the roster identity, again asynchronously.
+      p.then(_ => {
+        if (this._resolveIdentity) {
+          this._resolveIdentity(entry.actor.identity);
+          delete this._resolveIdentity;
+        }
+      });
       return p.then(_ => null);
     },
 
@@ -406,7 +414,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   UserRoster.prototype._checkShare = function() {
     throw new Error('no shares on user roster');
   };
-  // TODO find all shares for a given roster
+
 
   return {
     Roster: Roster,

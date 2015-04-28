@@ -86,13 +86,23 @@ require(deps, function(require) {
   var creator = new Entity();
   var user = new Entity();
 
+  test('roster identity matches creator identity', _ => {
+    return Roster.create(creator)
+      .then(roster => {
+        console.log('got roster');
+        return util.promiseDict({
+        roster: roster.identity,
+        creator: creator.identity
+        });
+      }).then(r => assert.memcmp(r.roster, r.creator));
+  });
   test('create roster and find creator', _ => {
-    return Roster.create(user)
-      .then(roster => roster.find(user))
+    return Roster.create(creator)
+      .then(roster => roster.find(creator))
       .then(found => util.promiseDict({
         found: found.identity,
-        user: user.identity
-      })).then(r => assert.memcmp(r.found, r.user));
+        creator: creator.identity
+      })).then(r => assert.memcmp(r.found, r.creator));
   });
   test('create roster and find first', _ => {
     return Roster.create(creator, user)
