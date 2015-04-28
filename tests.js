@@ -203,6 +203,24 @@ require(deps, function(require) {
     });
   });
 
+  test('get all shares', _ => {
+    return createTestRoster().then(result => {
+      return util.promiseDict({
+        stored: result.roster.allShares(),
+        expected: Promise.all(
+          Object.keys(result.users)
+            .map(k => result.users[k].share)
+        )
+      }).then(
+        r => assert.ok(r.expected.every(
+          toFind => r.stored.some(
+            candidate => util.bsEqual(candidate, toFind)
+          )
+        ))
+      );
+    });
+  });
+
   // TODO get all shares for the current roster
 
   run_tests();

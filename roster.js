@@ -302,25 +302,24 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
       //  - encodes the new message and records it
       //  - updates the cache of latest entries
 
-      // Set a new promise value for lastHash as soon as we decide to commit to
-      // any change. That way, subsequent calls are enqueued behind this.
-
       // Only resolve that promise when both parts of the operation are
       // complete.  That way, any attempt to add to the log (the official
       // transcript) will be assured to get a valid cache state.
 
-      // Drawback: Though it shouldn't, if anything here fails for any reason,
-      // the log can no longer be added to.  All calls to modify the log depend
-      // on the value of the last hash being valid.  It *might* be possible to
-      // back out a failed change, but that would need careful consideration.
-      return this.lastHash = util.promiseDict({
-        hash: Promise.resolve(encoded || entry.encode(this.lastHash))
+      // A lot of the operations that follow depend on knowing the hash of this
+      // newly added log entry.  This sets the promise that calculates this
+      // value, but doesn't await it.
+      var p = util.promiseDict({
+        logEntry: Promise.resolve(encoded || entry.encode(this.lastHash))
           .then(bits => {
             this.log.push(bits);
-            return c.digest(HASH, bits);
+            return bits;
           }),
-        update: this._updateCacheEntry(entry)
-      }).then(r => r.hash);
+        cacheUpdate: this._updateCacheEntry(entry)
+      });
+      // Update the hash, but asynchronously: don't await it.
+      this.lastHash = p.then(r => c.digest(HASH, r.logEntry));
+      return p;
     },
 
     /** Enact a change in policy for the subject, triggered by actor.  This will
