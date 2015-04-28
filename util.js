@@ -99,7 +99,7 @@ define(['require'], function(require) {
     }
   };
 
-  /** Like Promise.all(), except that it takes and returns an object. */
+  /** Like Promise.all(), except that it takes and returns a dictionary. */
   function promiseDict(o) {
     var result = {};
     return Promise.all(
