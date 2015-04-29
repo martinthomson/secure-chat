@@ -83,19 +83,19 @@ require(deps, function(require) {
       .then(assert.ok);
   });
 
-  var Roster = require('roster').Roster;
+  var AgentRoster = require('roster').AgentRoster;
   var admin = new Entity();
   var user = new Entity();
 
   test('roster identity does not matches first user identity', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(roster => util.promiseDict({
         roster: roster.identity,
         user: user.identity
       })).then(r => assert.notok(util.bsEqual(r.roster, r.user)));
   });
   test('create roster and find user', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(roster => roster.find(user))
       .then(found => util.promiseDict({
         found: found.identity,
@@ -103,29 +103,29 @@ require(deps, function(require) {
       })).then(r => assert.memcmp(r.found, r.user));
   });
   test('user can leave', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(roster => roster.change(user, user, EntityPolicy.NONE));
   });
   test('other user can\'t remove first user', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(roster => roster.change(new Entity(), user, EntityPolicy.NONE))
       .then(_ => assert.fail('should not succeed'), _ => true);
   });
   test('policy default is admin', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(roster => roster.findPolicy(user))
       .then(policy =>
             policy.equals(EntityPolicy.ADMIN) ||
             assert.failv('not admin', [policy]));
   });
   test('policy for absent user is none', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(roster => roster.findPolicy(new Entity()))
       .then(policy => policy.equals(EntityPolicy.NONE) ||
             assert.failv('not none', [policy]));
   });
   test('add user and change their policy', _ => {
-    return Roster.create(admin)
+    return AgentRoster.create(admin)
       .then(roster => {
         // This produces an incremental transition from
         // observer to admin and then back to none.
@@ -141,7 +141,7 @@ require(deps, function(require) {
       });
   });
   test('user can add after creator leaves', _ => {
-    return Roster.create(admin)
+    return AgentRoster.create(admin)
       .then(
         roster => roster.change(admin, user, EntityPolicy.USER)
           .then(_ => roster.change(admin, admin, EntityPolicy.NONE))
@@ -149,7 +149,7 @@ require(deps, function(require) {
       );
   });
   test('user can advertise share', _ => {
-    return Roster.create(user)
+    return AgentRoster.create(user)
       .then(
         roster => roster.share(user)
           .then(_ => roster.findShare(user))
@@ -163,8 +163,8 @@ require(deps, function(require) {
   /** Creates a roster with a creator-admin and one of each other named policy
    * type.  Returns a map with two keys: users and roster. All the users have
    * their shares advertised. */
-  var createTestRoster = _ => {
-    return Roster.create(admin)
+  var createTestAgentRoster = _ => {
+    return AgentRoster.create(admin)
       .then(roster => {
         var policies = ['ADMIN', 'USER', 'OBSERVER'];
         var users = policies.reduce(
@@ -184,10 +184,10 @@ require(deps, function(require) {
       });
   };
   test('encode and decode', _ => {
-    return createTestRoster().then(result => {
+    return createTestAgentRoster().then(result => {
       // Encode and decode the resulting roster.
       var encoded = result.roster.encode();
-      var decoded = new Roster([]);
+      var decoded = new AgentRoster([]);
       return decoded.decode(encoded)
         .then(_ => {
           // Get the set of users that we added to the original.
@@ -202,7 +202,7 @@ require(deps, function(require) {
   });
 
   test('get all shares', _ => {
-    return createTestRoster().then(result => {
+    return createTestAgentRoster().then(result => {
       return util.promiseDict({
         stored: result.roster.allShares(),
         expected: Promise.all(

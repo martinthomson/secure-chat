@@ -152,7 +152,6 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
         oldPolicy: this.findPolicy(subject)
       }).then(
         result => {
-          console.log(result);
           // A member can always reduce their own capabilities.  But only if
           // their old policy isn't already void (i.e., EntityPolicy.NONE).
           if (util.bsEqual(result.actorId, result.subjectId)) {
@@ -201,7 +200,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
     _validateEntry: function(entry) {
       // If this is the first entry, no checks.  A share operation will cause
       // the roster to become busted, so don't permit that.
-      if (this._resolveIdentity && !entry.opcode.equals(RosterOpcode.SHARE)) {
+      if (this._logIsEmpty() && !entry.opcode.equals(RosterOpcode.SHARE)) {
         return Promise.resolve();
       }
 
@@ -282,8 +281,10 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       // newly added log entry.  This sets the promise that calculates this
       // value, but doesn't await it.
       this.lastHash = p.then(rawEntry => c.digest(HASH, rawEntry));
-      // Set the roster identity, again asynchronously.
-      p.then(_ => this._firstEntry(entry));
+      // Set the roster identity based on the first log entry asynchronously.
+      if (this._logIsEmpty()) {
+        p.then(_ => this._firstEntry(entry));
+      }
       return p.then(_ => null);
     },
 
@@ -308,20 +309,24 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       );
     },
 
+    /** Returns true if there are no entries. */
+    _logIsEmpty: function() {
+      return this.log.length === 0;
+    },
+
     /** Determines if this is the first entry. */
     _firstEntry: function(entry) {
-      if (this._resolveIdentity) {
-        // Note that we register this roster in the global registry *before*
-        // resolving the identity; applications will use the resolution of
-        // identity as a signal to start using this roster and they need to be
-        // able to rely on a lookup succeeding when they do so.
-        var gotId = this._resolveIdentity;
-        delete this._resolveIdentity;
-        allRosters.register(this, entry.actor)
-          .then(_ => gotId(entry.actor.identity));
-        return true;
+      if (!this._resolveIdentity) {
+        throw new Error('unable to resolve the first identity');
       }
-      return false;
+      // Note that we register this roster in the global registry *before*
+      // resolving the identity; applications will use the resolution of
+      // identity as a signal to start using this roster and they need to be
+      // able to rely on a lookup succeeding when they do so.
+      var gotId = this._resolveIdentity;
+      delete this._resolveIdentity;
+      allRosters.register(this, entry.actor)
+        .then(_ => gotId(entry.actor.identity));
     },
 
     /** Updates all entries in the cache based on the entire transcript. It
@@ -339,6 +344,14 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
     }
   };
 
+  function AgentRoster() {
+    Roster.call(this);
+  }
+  AgentRoster.prototype = util.mergeDict({
+    _checkRosterChange: function() {
+    }
+  }, Object.create(Roster.prototype));
+
   /**
    * Creates a new agent roster.  Only the firstUser option is mandatory here.
    * By default the policy is EntityPolicy.ADMIN.
@@ -347,7 +360,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
    * created entity.  The keying material for that entity is discarded and never
    * used again.  It is only ever used to establish the roster.
    */
-  Roster.create = function(firstUser, policy) {
+  AgentRoster.create = function(firstUser, policy) {
     policy = policy || EntityPolicy.ADMIN;
     if (!policy.member || !policy.add) {
       throw new Error('firstUser must have "member" and "add" privileges');
@@ -363,13 +376,16 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
   }
   UserRoster.prototype = Object.create(Roster.prototype);
   util.mergeDict({
+    _checkChange: function() {
+      throw new Error('no shares on user roster');
+    },
     _checkShare: function() {
       throw new Error('no shares on user roster');
     }
   }, UserRoster.prototype);
 
   return {
-    Roster: Roster,
+    AgentRoster: AgentRoster,
     UserRoster: UserRoster
   };
 });
