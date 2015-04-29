@@ -15,6 +15,9 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     equals: function(other) {
       return other instanceof RosterOpcode &&
         this.opcode === other.opcode;
+    },
+    toString: function() {
+      return 'RosterOpcode(' + this.opcode + ')';
     }
   };
   RosterOpcode.decode = function(buf) {
