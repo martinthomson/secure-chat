@@ -5,6 +5,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
   var util = require('util');
   var EntityPolicy = require('policy');
   var PublicEntity = require('entity').PublicEntity;
+  var Entity = require('entity').Entity;
   var RosterOperation = require('rosterop').RosterOperation;
   var RosterOpcode = require('rosterop').RosterOpcode;
   var ChangeOperation = require('rosterop').ChangeOperation;
@@ -151,6 +152,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
         oldPolicy: this.findPolicy(subject)
       }).then(
         result => {
+          console.log(result);
           // A member can always reduce their own capabilities.  But only if
           // their old policy isn't already void (i.e., EntityPolicy.NONE).
           if (util.bsEqual(result.actorId, result.subjectId)) {
@@ -338,24 +340,22 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
   };
 
   /**
-   * Creates a new agent roster.  Only the creator option is mandatory here.  By
-   * default, the creator adds themself; by default the policy is
-   * EntityPolicy.ADMIN.  If the creator adds themself, this also adds their
-   * share to the log.
+   * Creates a new agent roster.  Only the firstUser option is mandatory here.
+   * By default the policy is EntityPolicy.ADMIN.
+   *
+   * This creates a new "change" entry in the log that is signed by a newly
+   * created entity.  The keying material for that entity is discarded and never
+   * used again.  It is only ever used to establish the roster.
    */
-  Roster.create = function(actor, subject, policy) {
-    subject = subject || actor;
+  Roster.create = function(firstUser, policy) {
     policy = policy || EntityPolicy.ADMIN;
     if (!policy.member || !policy.add) {
-      throw new Error('first entry must have "member" and "add" privileges');
+      throw new Error('firstUser must have "member" and "add" privileges');
     }
 
     var roster = new Roster();
-    var p = roster.change(actor, subject, policy);
-    if (actor === subject) {
-      p = p.then(_ => roster.share(actor));
-    }
-    return p.then(_ => roster);
+    return roster.change(new Entity(), firstUser, policy)
+      .then(_ => roster);
   };
 
   function UserRoster(log) {
