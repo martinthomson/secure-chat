@@ -25,13 +25,14 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   };
   RosterOpcode.CHANGE = new RosterOpcode(0);
   RosterOpcode.SHARE = new RosterOpcode(1);
-  RosterOpcode.CHANGE = new RosterOpcode(2);
+  RosterOpcode.CHANGE_ROSTER = new RosterOpcode(2);
 
   /**
    * The base implementation of an operation on the roster.
    */
-  function RosterOperation(actor) {
+  function RosterOperation(actor, subject) {
     this.actor = actor;
+    this.subject = subject;
   }
 
   RosterOperation.prototype = {
@@ -59,9 +60,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   };
 
   function ChangeOperation(actor, subject, policy) {
-    RosterOperation.call(this, actor);
+    RosterOperation.call(this, actor, subject);
     this.opcode = RosterOpcode.CHANGE;
-    this.subject = subject;
     this.policy = policy;
   }
   ChangeOperation.prototype = util.mergeDict({
@@ -71,9 +71,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }, Object.create(RosterOperation.prototype));
 
   function ShareOperation(actor) {
-    RosterOperation.call(this, actor);
+    RosterOperation.call(this, actor, actor);
     this.opcode = RosterOpcode.SHARE;
-    this.subject = actor;
   }
   ShareOperation.prototype = util.mergeDict({
     _encodeParts: function() {
@@ -92,12 +91,17 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }
   RosterChangeOperation.prototype = util.mergeDict({
     _encodeParts: function() {
-      return [ this.subject.encodeShare(), this.roster.encodeShare() ];
+      var base = ChangeOperation.prototype._encodeParts.call(this);
+      if (this.actorRoster) {
+        return base.concat([ this.actorRoster.identity ]);
+      }
+      return base.concat([ this.actor.identity
+                           .then(id => new Uint8Array(id.byteLength)) ]);
     }
   }, Object.create(ChangeOperation.prototype));
 
 
-  RosterOperation.decode = function(parser, lengths) {
+  RosterOperation.decode = function(parser, lengths, allRosters) {
     var opcode = RosterOpcode.decode(parser.next(lengths.opcode));
     var subject, actor, policy;
 
@@ -115,8 +119,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
     if (opcode.equals(RosterOpcode.CHANGE_ROSTER)) {
       subject = allRosters.lookup(parser.next(lengths.identifier));
       policy = EntityPolicy.decode(parser.next(lengths.policy));
-      actor = new PublicEntity(parser.next(lengths.identifier));
       var actorRoster = allRosters.lookup(parser.next(lengths.identifier));
+      actor = new PublicEntity(parser.next(lengths.identifier));
       return util.promiseDict({
         subject: subject,
         actorRoster: actorRoster

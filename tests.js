@@ -1,6 +1,6 @@
 /*global require:false */
-var deps = ['require', 'entity', 'policy',
-            'roster', 'util', 'test'];
+var deps = ['require', 'util', 'entity', 'policy',
+            'agentroster', 'userroster', 'test'];
 require(deps, function(require) {
   'use strict';
 
@@ -83,7 +83,7 @@ require(deps, function(require) {
       .then(assert.ok);
   });
 
-  var AgentRoster = require('roster').AgentRoster;
+  var AgentRoster = require('agentroster');
   var admin = new Entity();
   var user = new Entity();
 
@@ -202,21 +202,57 @@ require(deps, function(require) {
   });
 
   test('get all shares', _ => {
-    return createTestAgentRoster().then(result => {
-      return util.promiseDict({
-        stored: result.roster.allShares(),
-        expected: Promise.all(
-          Object.keys(result.users)
-            .map(k => result.users[k].share)
+    return createTestAgentRoster().then(result => util.promiseDict({
+      stored: result.roster.allShares(),
+      expected: Promise.all(
+        Object.keys(result.users)
+          .map(k => result.users[k].share)
+      )
+    })).then(
+      r => assert.ok(r.expected.every(
+        toFind => r.stored.some(
+          candidate => util.bsEqual(candidate, toFind)
         )
-      }).then(
-        r => assert.ok(r.expected.every(
-          toFind => r.stored.some(
-            candidate => util.bsEqual(candidate, toFind)
-          )
-        ))
-      );
-    });
+      ))
+    );
+  });
+
+  var UserRoster = require('userroster');
+
+  test('create user roster', _ => {
+    return createTestAgentRoster()
+      .then(result => UserRoster.create(result.roster));
+  });
+  test('create user roster and get all shares', _ => {
+    return Promise.all([createTestAgentRoster(),
+                        createTestAgentRoster(),
+                        createTestAgentRoster()])
+      .then(
+        agents => util.promiseDict({
+          // Create a user roster, add the extra agent rosters, then collect all
+          // the shares in the resulting combined roster.
+          rosterShares:
+          UserRoster.create(agents[0].roster).then(
+            userRoster => Promise.all(agents.slice(1).map(
+              agent => userRoster.change(agents[0].users.USER, agents[0].roster,
+                                               agent.roster, EntityPolicy.USER)
+            ))
+              .then(_ => userRoster.allShares())
+          ),
+
+          // Get all the shares for the users that have been added.
+          expectedShares:
+          agents.reduce(
+            (allUsers, agent) => allUsers.concat(
+              Object.keys(agent.users).map(k => agent.users[k])
+            ),
+            [admin]
+          ).map(u => u.share)
+        })
+      ).then(r => assert.ok(
+        util.arraySetEquals(r.rosterShares, r.expectedShares,
+                            util.bsEqual)
+      ));
   });
 
   run_tests();

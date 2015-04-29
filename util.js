@@ -121,7 +121,28 @@ define([], function() {
     }, host || {});
   }
 
+  /** An inefficient set reduction for arrays. */
+  function arraySet(a, comparator) {
+    comparator = comparator || ((x,y) => x === y);
+    return a.reduce((s, e) => {
+      if (!s.some(x => comparator(e, x))) {
+        s.push(e);
+      }
+      return s;
+    }, []);
+  }
+
+  /** An inefficient comparison for arrays that are used as sets. */
+  function arraySetEquals(a, b, comparator) {
+    a = arraySet(a);
+    b = arraySet(b);
+    comparator = comparator || ((x,y) => x === y);
+    return a.length === b.length &&
+      a.every(ae => b.some(be => comparator(ae, be)));
+  }
+
   return {
+    arraySetEquals: arraySetEquals,
     base64url: base64url,
     bsConcat: bsConcat,
     bsDivide: bsDivide,
