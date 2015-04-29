@@ -40,14 +40,12 @@ define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(r
       return this.find(entity).then(v => v ? v.share : null);
     },
 
-    /** Returns a promise for an array of all the active members in the roster.
-     * That is, all those that have provided shares. */
-    allShares: function() {
-      return Promise.all(
-        Object.keys(this._cache)
-          .map(k => this._cache[k].share)
-          .filter(s => !!s)
-      );
+    /** Returns an array of all the active members in the roster.  That is, all
+     * those that have provided shares. */
+    participants: function() {
+      return Object.keys(this._cache)
+        .map(k => this._cache[k])
+        .filter(e => !!e.share);
     },
 
     /** Enacts the change in `entry` on the cache. */

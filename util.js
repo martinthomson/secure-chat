@@ -134,8 +134,8 @@ define([], function() {
 
   /** An inefficient comparison for arrays that are used as sets. */
   function arraySetEquals(a, b, comparator) {
-    a = arraySet(a);
-    b = arraySet(b);
+    a = arraySet(a, comparator);
+    b = arraySet(b, comparator);
     comparator = comparator || ((x,y) => x === y);
     return a.length === b.length &&
       a.every(ae => b.some(be => comparator(ae, be)));

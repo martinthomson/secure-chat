@@ -78,10 +78,10 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       return this.find(entity).then(v => v ? v.policy : EntityPolicy.NONE);
     },
 
-    /** Returns a promise for an array of all the active members in the roster.
-     * That is, all those that have provided shares. */
-    allShares: function() {
-      throw new Error('allShares not implemented on base roster');
+    /** Returns an array of all the active participants in the roster.  That is,
+     * all those that have provided shares. */
+    participants: function() {
+      throw new Error('participants not implemented on base roster');
     },
 
     encode: function() {
@@ -164,7 +164,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       ]);
     },
 
-    /** Appends an entry and returns the updated lastHash. */
+    /** Appends an entry and returns the encoded entry that it created. */
     _addEntry: function(entry, encoded) {
       // This concurrently:
       //  - encodes the new message and records it
@@ -195,7 +195,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       if (this._logIsEmpty()) {
         p.then(_ => this._firstEntry(entry));
       }
-      return p.then(_ => null);
+      return p;
     },
 
     /** Decode the buffer into an operation and add it to the log. This rejects

@@ -203,18 +203,17 @@ require(deps, function(require) {
 
   test('get all shares', _ => {
     return createTestAgentRoster().then(result => util.promiseDict({
-      stored: result.roster.allShares(),
+      stored: Promise.all(result.roster.participants()
+                          .map(participant => participant.encodeShare())),
       expected: Promise.all(
-        Object.keys(result.users)
-          .map(k => result.users[k].share)
+        [ admin ].concat(
+          Object.keys(result.users)
+            .map(k => result.users[k])
+        ).map(u => u.encodeShare())
       )
-    })).then(
-      r => assert.ok(r.expected.every(
-        toFind => r.stored.some(
-          candidate => util.bsEqual(candidate, toFind)
-        )
-      ))
-    );
+    })).then(r => assert.ok(
+      util.arraySetEquals(r.stored, r.expected, util.bsEqual)
+    ));
   });
 
   var UserRoster = require('userroster');
@@ -237,17 +236,22 @@ require(deps, function(require) {
               agent => userRoster.change(agents[0].users.USER, agents[0].roster,
                                                agent.roster, EntityPolicy.USER)
             ))
-              .then(_ => userRoster.allShares())
+              .then(_ => Promise.all(
+                userRoster.participants()
+                  .map(participant => participant.encodeShare())
+              ))
           ),
 
           // Get all the shares for the users that have been added.
           expectedShares:
-          agents.reduce(
-            (allUsers, agent) => allUsers.concat(
-              Object.keys(agent.users).map(k => agent.users[k])
-            ),
-            [admin]
-          ).map(u => u.share)
+          Promise.all(
+            agents.reduce(
+              (allUsers, agent) => allUsers.concat(
+                Object.keys(agent.users).map(k => agent.users[k])
+              ),
+              [ admin ]
+            ).map(u => u.encodeShare())
+          )
         })
       ).then(r => assert.ok(
         util.arraySetEquals(r.rosterShares, r.expectedShares,

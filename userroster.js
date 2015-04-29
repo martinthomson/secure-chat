@@ -28,11 +28,10 @@ define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(r
 
     /** Traverse all the rosters that this references and grab all the
      * shares on those, then join them together. */
-    allShares: function() {
-      return Promise.all(
-        Object.keys(this._cache)
-          .map(k => this._cache[k].roster.allShares())
-      ).then(collected => collected.reduce((all, s) => all.concat(s), []));
+    participants: function() {
+      return Object.keys(this._cache)
+        .map(k => this._cache[k].roster.participants())
+        .reduce((all, participant) => all.concat(participant), []);
     },
 
     /** Enacts the change in `entry` on the cache. */
