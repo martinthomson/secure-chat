@@ -1,4 +1,5 @@
-define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(require) {
+var reqs = ['require', 'util', 'entity', 'policy', 'rosterop', 'roster'];
+define(reqs, function(require) {
   'use strict';
 
   var util = require('util');
@@ -8,7 +9,8 @@ define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(r
   var RosterChangeOperation = require('rosterop').RosterChangeOperation;
   var Roster = require('roster');
 
-  /** Used internally by the roster to track the status of entities in the roster */
+  /** Used internally by the roster to track the status of entities in the
+   * roster */
   function UserCacheEntry(roster, policy) {
     this.roster = roster;
     this.policy = policy;
@@ -23,11 +25,12 @@ define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(r
      * reject if the change is not permitted.
      */
     change: function(actor, actorRoster, subject, policy) {
-      return this._addEntry(new RosterChangeOperation(actor, actorRoster, subject, policy));
+      return this._addEntry(new RosterChangeOperation(actor, actorRoster,
+                                                      subject, policy));
     },
 
-    /** Traverse all the rosters that this references and grab all the
-     * shares on those, then join them together. */
+    /** Traverse all the rosters that this roster includes as members.  This
+     * then finds the participants on each of these and joins them together. */
     participants: function() {
       return Object.keys(this._cache)
         .map(k => this._cache[k].roster.participants())

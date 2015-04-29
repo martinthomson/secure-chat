@@ -1,4 +1,5 @@
-define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(require) {
+var reqs = ['require', 'util', 'entity', 'policy', 'rosterop', 'roster'];
+define(reqs, function(require) {
   'use strict';
 
   var util = require('util');
@@ -10,7 +11,8 @@ define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(r
   var ShareOperation = require('rosterop').ShareOperation;
   var Roster = require('roster');
 
-  /** Used internally by the roster to track the status of entities in the roster */
+  /** Used internally by the roster to track the status of entities in the
+   * roster */
   function AgentCacheEntry(subject, policy) {
     PublicEntity.call(this, subject.identity, subject.share);
     this.policy = policy;
@@ -41,7 +43,9 @@ define(['require', 'util', 'entity', 'policy', 'rosterop', 'roster'], function(r
     },
 
     /** Returns an array of all the active members in the roster.  That is, all
-     * those that have provided shares. */
+     * those that have provided shares.  Since this is a terminal roster (all
+     * members are expected to offer shares), this is just the set of
+     * participants.  */
     participants: function() {
       return Object.keys(this._cache)
         .map(k => this._cache[k])
