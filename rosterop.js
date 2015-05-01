@@ -30,7 +30,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   /**
    * The base implementation of an operation on the roster.
    */
-  function RosterOperation(actor, subject) {
+  function RosterOperation(opcode, actor, subject) {
+    this.opcode = opcode;
     this.actor = actor;
     this.subject = subject;
   }
@@ -60,8 +61,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   };
 
   function ChangeOperation(actor, subject, policy) {
-    RosterOperation.call(this, actor, subject);
-    this.opcode = RosterOpcode.CHANGE;
+    RosterOperation.call(this, RosterOpcode.CHANGE, actor, subject);
     this.policy = policy;
   }
   ChangeOperation.prototype = util.mergeDict({
@@ -71,8 +71,7 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
   }, Object.create(RosterOperation.prototype));
 
   function ShareOperation(actor) {
-    RosterOperation.call(this, actor, actor);
-    this.opcode = RosterOpcode.SHARE;
+    RosterOperation.call(this, RosterOpcode.SHARE, actor, actor);
   }
   ShareOperation.prototype = util.mergeDict({
     _encodeParts: function() {
@@ -85,8 +84,8 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
    * permitted. The actor is used to provide the signing public key; the actor
    * also needs to be a member on the roster. */
   function RosterChangeOperation(actor, actorRoster, subject, policy) {
-    ChangeOperation.call(this, actor, subject, policy);
-    this.opcode = RosterOpcode.CHANGE_ROSTER;
+    ChangeOperation.call(this, RosterOpcode.CHANGE_ROSTER,
+                         actor, subject, policy);
     this.actorRoster = actorRoster;
   }
   RosterChangeOperation.prototype = util.mergeDict({

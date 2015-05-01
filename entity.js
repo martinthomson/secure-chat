@@ -1,8 +1,9 @@
-define(['require', 'util'], function(require) {
+define(['require', 'util', 'hkdf'], function(require) {
   'use strict';
 
   var c = crypto.subtle;
   var util = require('util');
+  var hkdf = require('hkdf');
 
   const CURVE = 'P-256';
   const ECDSA_KEY = { name: 'ECDSA', namedCurve: CURVE };
@@ -118,6 +119,17 @@ define(['require', 'util'], function(require) {
     sign: function(message) {
       return this.signKey
         .then(pair => c.sign(ECDSA_SIGN, pair.privateKey, message));
+    },
+
+    /** Enciphers a key using the remote share. Or deciphers an encrypted key in
+     * the same way. XOR FTW. */
+    maskKey: function(share, key) {
+      return util.promiseDict({
+        priv: this.ecdhKey,
+        pub: Promise.resolve(share)
+      }).then(r => c.deriveBits({ name: 'ECDH', public: r.pub }, r.priv, 256))
+        .then(bits => hkdf(new Uint8Array(0), bits, 'key', key.byteLength))
+        .then(keyMask => util.bsXor(keyMask, key));
     }
   };
 

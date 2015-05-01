@@ -141,6 +141,16 @@ define([], function() {
       a.every(ae => b.some(be => comparator(ae, be)));
   }
 
+  function xor(a, b) {
+    if (a.byteLength !== b.byteLength) {
+      throw new Error('bsXor args must be the same length');
+    }
+    a = new Uint8Array(a);
+    b = new Uint8Array(b);
+    return a.map((av, i) => av ^ b[i]);
+  }
+
+
   return {
     arraySetEquals: arraySetEquals,
     base64url: base64url,
@@ -148,6 +158,7 @@ define([], function() {
     bsDivide: bsDivide,
     bsEqual: bsEqual,
     bsHex: bsHex,
+    bxXor: bsXor,
     mergeDict: mergeDict,
     promiseDict: promiseDict,
     Parser: Parser

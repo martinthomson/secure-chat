@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>✊ Secure Chat</title>
+    <meta charset="utf-8"></meta>
+    <script data-main="chat.js" src="lib/require.js" type="application/javascript"></script>
+    <style type="text/css">
+      table { max-width: 960px; border-collapse: collapse; }
+      td, th { vertical-align: baseline; }
+      .id { display: inline-block; max-width: 120px; overflow: hidden; vertical-align: baseline; }
+      textarea { width: 300px; height: 400px; font-size: 95%; }
+    </style>
+  </head>
+  <body>
+    <table>
+      <tr>
+        <th>Agent Roster</th><th>User Roster</th><th>Messages</th>
+      </tr>
+      <tr>
+        <td>
+          <textarea id="agentroster"></textarea><br>
+          <button id="agentrosterupdate">Update</button>
+        </td>
+        <td>
+          <textarea id="userroster"></textarea><br>
+          <button id="userrosterupdate">Update</button>
+        </td>
+        <td>
+          <div id="log"></div>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          ID: <input id="agentrosterid" readonly><br>
+          <input type="text" id="agentid"></input><br>
+          <button id="agentadd">Add Agent</button>
+          <button id="agentremove">Remove Agent</button>
+        </td>
+        <td>
+          ID: <input class="id" id="userrosterid" readonly><br>
+          <input type="text" id="otheruserid"></input><br>
+          <button id="otheruseradd">Add User</button>
+          <button id="otheruserremove">Remove User</button>
+        </td>
+        <td>
+          ID: <input class="id" id="userid" readonly><br>
+          <button id="rekey">Rekey</button><br>
+          <input type="text" id="message"></input>
+          <button id="messagesend">Send</button>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

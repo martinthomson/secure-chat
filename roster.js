@@ -78,10 +78,10 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       return this.find(entity).then(v => v ? v.policy : EntityPolicy.NONE);
     },
 
-    /** Returns an array of all the active participants in the roster.  That is,
+    /** Returns an array of all the active members in the roster.  That is,
      * all those that have provided shares. */
     members: function() {
-      throw new Error('participants not implemented on base roster');
+      throw new Error('members not implemented on base roster');
     },
 
     encode: function() {
