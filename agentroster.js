@@ -45,8 +45,8 @@ define(reqs, function(require) {
     /** Returns an array of all the active members in the roster.  That is, all
      * those that have provided shares.  Since this is a terminal roster (all
      * members are expected to offer shares), this is just the set of
-     * participants.  */
-    participants: function() {
+     * members.  */
+    members: function() {
       return Object.keys(this._cache)
         .map(k => this._cache[k])
         .filter(e => !!e.share);

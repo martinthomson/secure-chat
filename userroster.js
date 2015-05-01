@@ -30,11 +30,11 @@ define(reqs, function(require) {
     },
 
     /** Traverse all the rosters that this roster includes as members.  This
-     * then finds the participants on each of these and joins them together. */
-    participants: function() {
+     * then finds the members on each of these and joins them together. */
+    members: function() {
       return Object.keys(this._cache)
-        .map(k => this._cache[k].roster.participants())
-        .reduce((all, participant) => all.concat(participant), []);
+        .map(k => this._cache[k].roster.members())
+        .reduce((all, member) => all.concat(member), []);
     },
 
     /** Enacts the change in `entry` on the cache. */

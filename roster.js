@@ -80,7 +80,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
 
     /** Returns an array of all the active participants in the roster.  That is,
      * all those that have provided shares. */
-    participants: function() {
+    members: function() {
       throw new Error('participants not implemented on base roster');
     },
 
