@@ -1,0 +1,24 @@
+each message needs to be encrypted with a unique IV
+each message needs to identify the key it uses
+
+# message format
+ 
+opcode(1) = MESSAGE
+length(2)
+keyId = hkdf(peerId, key, 'keyid', 16) -- where peerId is the peer that set this key
+seqnum(2) = a counter maintained by the sender
+senderId = public key of sender
+encrypted { 
+  message
+  signature over message
+}
+
+opcode(1) = REKEY
+length(2)
+senderId = public key of sender
+repeated {
+  peerId = public key of peer
+  encipheredKey(16) = key XOR hkdf(0, DH(sender, peer), 'key', 16)
+}
+
+Note: one consequence of this scheme is that it's not possible to reshare the same key - any attempt to reshare a key will result in a new identifier for that key.
