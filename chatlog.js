@@ -3,10 +3,12 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
   var Roster = require('roster');
   var hkdf = require('hkdf');
   var util = require('util');
+  var PublicEntity = require('entity').PublicEntity;
+  var Entity = require('entity').Entity;
 
-  /** A chat key is a key that has been provided by keyAgent. */
+  /** A chat key is a key that has been provided by the identified agent. */
   function ChatKey(agent, rawKey) {
-    this.identifier = agent.identifier
+    this.identity = agent.identity
       .then(id => hkdf(id, rawKey, 'keyid', 16));
     this._key = crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false,
                                         [ 'encrypt', 'decrypt' ]);
@@ -37,11 +39,16 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
       counter[11] = seqno & 0xff;
       return util.promiseDict({
         nonce: sender.identity
-          .then(id => hkdf(counter, id, 'nonce', 12))
-          .then(nonce => util.bsXor(nonce, counter));
+          .then(id => hkdf(new Uint8Array(0), id, 'nonce', 12))
+          .then(nonce => util.bsXor(nonce, counter)),
         key: this._key
       });
     }
+  };
+  ChatKey.keyLength = 16;
+  ChatKey.idLength = 16;
+  ChatKey.generateKey = function() {
+    return crypto.getRandomValues(ChatKey.keyLength);
   };
 
   function ChatOpcode(op) {
@@ -62,8 +69,8 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
   ChatOpcode.decode = function(parser) {
     return new ChatOpcode(parser.next(1)[0]);
   };
-  ChatOpcode.REKEY = new ChatOpcode(0);
-  ChatOpcode.MESSAGE = new ChatOpcode(1);
+  ChatOpcode.KEY = new ChatOpcode(0);
+  ChatOpcode.ENCRYPTED = new ChatOpcode(1);
 
   function ChatOperation(opcode, actor) {
     this.opcode = opcode;
@@ -76,7 +83,7 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
   };
 
   function RekeyOperation(actor, actorRoster, key, members) {
-    ChatOperation.call(this, ChatOpcode.REKEY, actor);
+    ChatOperation.call(this, ChatOpcode.KEY, actor);
     this.actorRoster = actorRoster;
     this.key = key;
     this.members = members || [];
@@ -113,11 +120,6 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
     }
   }, Object.create(ChatOperation.prototype));
 
-  RekeyOperation.keyLength = 16;
-  RekeyOperation.generateKey = function() {
-    return crypto.getRandomValues(RekeyOperation.keyLength);
-  }
-
   /** Finds the given peer agent and user.  Checks that peerUser is a member of
    * the userRoster, and that peerAgent is a member of the roster corresponding
    * to peerUser. */
@@ -130,41 +132,54 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
     };
     return Roster.findRoster(peerUser).then(
       peerRoster => util.promiseDict({
-        validUser: userRoster.find(peerRoster)
+        user: userRoster.find(peerRoster)
           .then(isAllowed),
         actor: peerRoster.find(peerAgent)
-          .then(isAllowed)
-      }).then(r => {
-        return {
-          actor: r.actor,
-          actorRoster: peerRoster
-        };
+          .then(isAllowed),
+        actorRoster: peerRoster
       })
     );
   };
 
-  RekeyOperation.decode = function(agent, userRoster, parser) {
+  RekeyOperation._findOurEncryptedKey = function(parser, agentId, lengths) {
+    var count = (parser.next(1)[0] << 8) | (parser.next(1)[0]);
+    var pieceSize = lengths.identifier + ChatKey.keyLength;
+    var found = util.bsDivide(parser.next(count * pieceSize), pieceSize)
+        .map(piece => new util.Parser(piece))
+        .find(pieceParser => util.bsEqual(agentId,
+                                          pieceParser.next(lengths.identifier)));
+    // We allow for the possibility that someone encrypted this message
+    // without including us.  That happens if we were just added or removed
+    // and we haven't seen that message yet.  In that case, it's not an error,
+    // so allow the decoding to proceed.
+    //
+    // A zero-length key is an OK input to pass to Entity.maskKey (below).  We
+    // don't even have to be careful not to actually try to encrypt with that
+    // key, WebCrypto will prevent us from importing a dud key.
+    var encryptedKey = new Uint8Array(0);
+    if (found) {
+      encryptedKey = found.next(ChatKey.keyLength);
+    }
+    return encryptedKey;
+  };
+
+  RekeyOperation.decode = function(parser, agent, userRoster) {
     return util.promiseDict({
       lengths: PublicEntity.lengths,
       agentId: agent.identity
     }).then(r => {
       var lengths = r.lengths;
       var agentId = r.agentId;
+      var start = parser.mark();
 
       // Who sent this?
       var peerAgent = new PublicIdentity(parser.next(lengths.identifier));
       var peerUser = new PublicIdentity(parser.next(lengths.identifier));
 
-      var count = (parser.next(1)[0] << 8) | (parser.next(1)[0]);
-      var pieceSize = lengths.identifier + RekeyOperation.keyLength;
-      var found = util.bsDivide(parser.next(count * pieceSize), pieceSize)
-        .map(piece => new util.Parser(piece))
-        .find(pieceParser => util.bsEqual(agentId,
-                                          pieceParser.next(lengths.identifier)));
-      var rawKey;
-      if (found) {
-        rawKey = found.next(RekeyOperation.keyLength);
-      }
+      var encryptedKey = RekeyOperation._findOurEncryptedKey(parser, agentId,
+                                                             lengths);
+
+      // TODO: this doesn't cover the opcode; want discriminator strings here.
       var msg = parser.marked(start);
       var sig = parser.next(lengths.signature);
       return util.promiseDict({
@@ -176,25 +191,20 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
           }),
         op: RekeyOperation._findActor(userRoster, peerAgent, peerUser)
           .then(
-            r => agent.maskKey(r.actor.share, encrypted)
-              .then(key => new RekeyOperation(r.actor, r.actorRoster, rawKey, []))
+            r => agent.maskKey(r.actor.share, encryptedKey)
+              .then(rawKey => new RekeyOperation(r.actor, r.actorRoster,
+                                                 rawKey, []))
           )
       });
     }).then(r => r.op);
   };
 
-  function MessageOperation(actor, message) {
+  function EncryptedOperation(actor, message) {
+    ChatOperation.call(this, ChatOpcode.ENCRYPTED, actor);
+    this.message = message;
   }
-  MessageOperation.prototype = util.mergeDict({
-    _getIV: function() {
-      var iv = new Uint8Array(12);
-      for (var i = 0; i < 6; ++i) {
-        iv[iv.length - 1 - i] = (this.log.length / Math.pow(256, i)) & 0xff;
-      }
-      return iv;
-    },
-
-    encode: function(key, iv) {
+  EncryptedOperation.prototype = util.mergeDict({
+    encode: function(key, seqno) {
       return this._encodeParts()
         .then(parts => {
           var opcode = this.opcode.encode();
@@ -212,38 +222,87 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
         });
     }
   }, Object.create(ChatOperation.prototype));
-  MessageOperation.decode = function(user, roster, key, parser) {
+  EncryptedOperation.decode = function(parser, user, roster, key) {
   };
 
-  ChatOperation.decode = function(user, roster, key, parser) {
+  ChatOperation.decode = function(parser, user, roster, key) {
     var opcode = ChatOpcode.decode(parser);
-    if (opcode.equals(ChatOpcode.REKEY)) {
-      return RekeyOperation.decode(user, roster, parser);
+    if (opcode.equals(ChatOpcode.KEY)) {
+      return RekeyOperation.decode(parser, user, roster);
     }
-    if (opcode.equals(ChatOpcode.MESSAGE)) {
-      return MessageOperation.decode(user, roster, key, parser);
+    if (opcode.equals(ChatOpcode.ENCRYPTED)) {
+      return EncryptedOperation.decode(parser, user, roster, key);
     }
     throw new Error('invalid opcode ' + opcode);
   };
 
-
+  /** A log of chat messages.  Note that unlike the roster, there is no strong
+   * ordering of this log.  The log is only loosely ordered.
+   */
   function ChatLog(roster, user) {
     this.log = [];
     this.roster = roster;
     this.identity = roster.identity;
     this.user = user;
+    this._keystore = {};
   }
   ChatLog.prototype = {
 
-    _addOperation: function(op) {
-      op.encode(
+    decode: function(buf) {
+      var parser = new util.Parser(buf);
+      var loadRemainingOperations = _ => {
+        if (parser.remaining <= 0) {
+          return;
+        }
+        return this._decodeAndAdd(parser)
+          .then(loadRemainingOperations);
+      };
+      return loadRemainingOperations();
     },
 
-      rekey: function(user) {
-        var op = new RekeyOperation(this.user, RekeyOperation.generateKey(),
-                                    this.roster.members());
-      return this._addOperation(op);
+    rekey: function() {
+      var rawKey = ChatKey.generateKey();
+      return this._addOperation(new RekeyOperation(this.user, rawKey,
+                                                   this.roster.members()))
+        .then(op => {
+          this._key = new ChatKey(this.user, rawKey);
+          this._seqno = 0;
+          return this._storeKey(this._key).then(_ => op);
+        });
+    },
+
+    send: function(message) {
+      return this._addOperation(new EncryptedOperation(this.user, message));
+    },
+
+    _addOperation: function(op) {
+      op.encode(this._key, this._seqno++)
+        .then(encoded => {
+          this.log.push(encoded);
+          return encoded;
+        });
+    },
+
+    _decodeAndAdd: function(parser) {
+      var startPosition = parser.mark();
+      return PublicIdentity.lengths.then(
+        lengths => ChatOperation.decode()
+          .then({
+          })
+      );
+    },
+
+    _storeKey: function(k) {
+      return k.identifier
+        .then(id => this._keystore[util.base64url.encode(id)] = k);
+    },
+
+    _getKey: function(kid) {
+      return this._keystore[util.base64url.encode(id)];
     }
   };
-  return ChatLog;
+  return {
+    ChatKey: ChatKey,
+    ChatLog: ChatLog
+  };
 });

@@ -9,6 +9,9 @@ define(['util'], function(util) {
   }
 
   function hkdf(salt, ikm, info, len) {
+    if (typeof info === 'string') {
+      info = new TextEncoder('utf-8').encode(info);
+    }
     return new hmac(salt).hash(ikm)
       .then(prk => new hmac(prk))
       .then(prkh => {

@@ -43,6 +43,8 @@ define(['require', 'util', 'hkdf'], function(require) {
   }
   PublicEntity.prototype = {
     /** Verify that a message came from this entity. */
+    // TODO: add a discriminator string to signatures so that we don't create a
+    // signing oracle
     verify: function(signature, message) {
       return this.signPublic
         .then(key => c.verify(ECDSA_SIGN, key, signature, message));

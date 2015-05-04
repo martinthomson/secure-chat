@@ -1,6 +1,6 @@
 /*global require:false */
 var deps = ['require', 'util', 'entity', 'policy',
-            'agentroster', 'userroster', 'test'];
+            'agentroster', 'userroster', 'chatlog', 'test'];
 require(deps, function(require) {
   'use strict';
 
@@ -161,25 +161,25 @@ require(deps, function(require) {
       );
   });
   /** Creates a roster with a creator-admin and one of each other named policy
-   * type.  Returns a map with two keys: users and roster. All the users have
+   * type.  Returns a map with two keys: agents and roster. All the agents have
    * their shares advertised. */
   var createTestAgentRoster = _ => {
     return AgentRoster.create(admin)
       .then(roster => {
         var policies = ['ADMIN', 'USER', 'OBSERVER'];
-        var users = policies.reduce(
+        var agents = policies.reduce(
           (userMap, policy) => {
             userMap[policy] = new Entity();
             return userMap;
           }, {});
         return Promise.all(
           policies.map(
-            policy => roster.change(admin, users[policy],
+            policy => roster.change(admin, agents[policy],
                                     EntityPolicy[policy])
-              .then(_ => roster.share(users[policy]))
+              .then(_ => roster.share(agents[policy]))
           )
         ).then(_ => {
-          return { roster: roster, users: users };
+          return { roster: roster, agents: agents };
         });
       });
   };
@@ -190,12 +190,12 @@ require(deps, function(require) {
       var decoded = new AgentRoster([]);
       return decoded.decode(encoded)
         .then(_ => {
-          // Get the set of users that we added to the original.
-          var users = Object.keys(result.users)
-              .map(k => result.users[k]);
+          // Get the set of user tshat we added to the original.
+          var agents = Object.keys(result.agents)
+              .map(k => result.agents[k]);
           // Find all of them to check that they were copied over.
           return Promise.all(
-            users.map(u => decoded.find(u))
+            agents.map(u => decoded.find(u))
           ).then(found => found.map(assert.ok));
         });
     });
@@ -207,8 +207,8 @@ require(deps, function(require) {
                           .map(member => member.encodeShare())),
       expected: Promise.all(
         [ admin ].concat(
-          Object.keys(result.users)
-            .map(k => result.users[k])
+          Object.keys(result.agents)
+            .map(k => result.agents[k])
         ).map(u => u.encodeShare())
       )
     })).then(r => assert.ok(
@@ -222,41 +222,66 @@ require(deps, function(require) {
     return createTestAgentRoster()
       .then(result => UserRoster.create(result.roster));
   });
-  test('create user roster and get all shares', _ => {
+
+  var createTestUserRoster = _ => {
     return Promise.all([createTestAgentRoster(),
                         createTestAgentRoster(),
                         createTestAgentRoster()])
-      .then(
-        agents => util.promiseDict({
-          // Create a user roster, add the extra agent rosters, then collect all
-          // the shares in the resulting combined roster.
-          rosterShares:
-          UserRoster.create(agents[0].roster).then(
-            userRoster => Promise.all(agents.slice(1).map(
-              agent => userRoster.change(agents[0].users.USER, agents[0].roster,
-                                         agent.roster, EntityPolicy.USER)
-            ))
-              .then(_ => Promise.all(
-                userRoster.members()
-                  .map(member => member.encodeShare())
-              ))
-          ),
+      .then(users => util.promiseDict({
+        roster:
+        UserRoster.create(users[0].roster).then(
+          userRoster => Promise.all(users.slice(1).map(
+            user => userRoster.change(users[0].agents.USER, users[0].roster,
+                                      user.roster, EntityPolicy.USER)
+          )).then(_ => userRoster)
+        ),
 
-          // Get all the shares for the users that have been added.
-          expectedShares:
-          Promise.all(
-            agents.reduce(
-              (allUsers, agent) => allUsers.concat(
-                Object.keys(agent.users).map(k => agent.users[k])
-              ),
-              [ admin ]
-            ).map(u => u.encodeShare())
-          )
-        })
-      ).then(r => assert.ok(
+        users: users.map(x => x.roster),
+
+        agents: users.reduce(
+          (allAgents, user) => {
+            var agents = Object.keys(user.agents)
+                .map(k => user.agents[k]);
+            return allAgents.concat(agents);
+          },
+          [ admin ]
+        )
+      }));
+  };
+
+  test('create user roster and get all shares', _ => {
+    return createTestUserRoster()
+      .then(r => util.promiseDict({
+        rosterShares:  Promise.all(
+          r.roster.members()
+            .map(member => member.encodeShare())
+        ),
+
+        expectedShares: Promise.all(
+          r.agents.map(agent => agent.encodeShare())
+        )
+      })).then(r => assert.ok(
         util.arraySetEquals(r.rosterShares, r.expectedShares,
                             util.bsEqual)
       ));
+  });
+
+  var ChatKey = require('chatlog').ChatKey;
+
+  test('create a chat key', _ => {
+    var rand = crypto.getRandomValues(new Uint8Array(16));
+    var key = new ChatKey(new Entity(), rand);
+    return key.identity;
+  });
+
+  var ChatLog = require('chatlog').ChatLog;
+
+  test('create a chat log', _ => {
+    return createTestUserRoster()
+      .then(r => {
+        var chat = new ChatLog(r.roster, r.users.USER);
+        return chat;
+      });
   });
 
   run_tests();

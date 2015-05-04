@@ -1,26 +1,35 @@
 each message needs to be encrypted with a unique IV
+
 each message needs to identify the key it uses
 
+
 # message format
+
+## Encrypted Message
 
 opcode(1) = MESSAGE
 keyId = hkdf(peerId, key, 'keyid', 16) -- where peerId is the peer that set this key
 seqno(2) = a counter maintained by the sender
 senderId = public key of sender
 encrypted[2] { -- i.e., a buffer with a length encoded on 2 bytes
+  opcode(1)
   message
   signature over message
 }
 
 The nonce for this message is derived from the senderId:
-nonce = hkdf(seqno(2), senderId, 'nonce', 12)
+nonce = seqno(12) XOR hkdf([], senderId, 'nonce', 12)
+This is pure a random oracle usage, to avoid collisions from any given sender.
+
+## Rekey Message
 
 opcode(1) = REKEY
 senderId = public key of sender
 repeated[2] { -- i.e., repeated with a count that is encoded on a length of 2
   peerId = public key of peer
-  encipheredKey(16) = key XOR hkdf(0, DH(sender, peer), 'key', 16)
+  encipheredKey(16) = key XOR hkdf([], DH(sender, peer), 'key', 16)
 }
+signature over message
 
 Note: one consequence of this scheme is that it's not possible to reshare the
 same key - any attempt to reshare a key will result in a new identifier for that
