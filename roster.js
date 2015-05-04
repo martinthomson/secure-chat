@@ -174,8 +174,8 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       // complete.  That way, any attempt to add to the log (the official
       // transcript) will be assured to get a valid cache state.
 
-      // We have to use the current value and don't await the value that is
-      // below, which would setup an unresolvable loop.
+      // We have to save the current value so that we don't await the amended
+      // value below, which would create a deadlock.
       var savedHash = this._lastHash;
       var p = this._validateEntry(entry)
           .then(_ => util.promiseDict({
@@ -189,7 +189,8 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
 
       // A lot of the operations that follow depend on knowing the hash of this
       // newly added log entry.  This sets the promise that calculates this
-      // value, but doesn't await it.
+      // value, but doesn't await it.  This promise is used to ensure that
+      // operations are properly sequenced.
       this._lastHash = p.then(rawEntry => c.digest(HASH, rawEntry));
       // Set the roster identity based on the first log entry asynchronously.
       if (this._logIsEmpty()) {

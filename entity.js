@@ -126,11 +126,13 @@ define(['require', 'util', 'hkdf'], function(require) {
     /** Enciphers a key using the remote share. Or deciphers an encrypted key in
      * the same way. XOR FTW. */
     maskKey: function(share, key) {
+      console.log('maskKey', this, share, key);
       return util.promiseDict({
         priv: this.ecdhKey,
         pub: Promise.resolve(share)
-      }).then(r => c.deriveBits({ name: 'ECDH', public: r.pub }, r.priv, 256))
-        .then(bits => hkdf(new Uint8Array(0), bits, 'key', key.byteLength))
+      }).then(r => c.deriveBits({ name: 'ECDH', public: r.pub },
+                                r.priv.privateKey, 256))
+        .then(bits => hkdf(new Uint8Array(1), bits, 'key', key.byteLength))
         .then(keyMask => util.bsXor(keyMask, key));
     }
   };

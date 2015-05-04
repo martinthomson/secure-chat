@@ -160,7 +160,7 @@ define([], function() {
     bsDivide: bsDivide,
     bsEqual: bsEqual,
     bsHex: bsHex,
-    bxXor: bsXor,
+    bsXor: bsXor,
     mergeDict: mergeDict,
     promiseDict: promiseDict,
     Parser: Parser

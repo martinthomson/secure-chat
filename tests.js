@@ -63,7 +63,8 @@ require(deps, function(require) {
   });
   test('policy can change', _ => {
     var allPolicies = policyOrder.concat([
-      ['add'], ['add', 'remove'], ['remove'], ['member', 'remove']
+      [ 'add' ], [ 'add', 'remove' ],
+      [ 'remove' ], [ 'member', 'remove' ]
     ].map(privs => new EntityPolicy(privs)));
     return allPolicies.every(a => {
       return allPolicies.filter(b => b !== a)
@@ -116,13 +117,13 @@ require(deps, function(require) {
       .then(roster => roster.findPolicy(user))
       .then(policy =>
             policy.equals(EntityPolicy.ADMIN) ||
-            assert.failv('not admin', [policy]));
+            assert.failv('not admin', [ policy ]));
   });
   test('policy for absent user is none', _ => {
     return AgentRoster.create(user)
       .then(roster => roster.findPolicy(new Entity()))
       .then(policy => policy.equals(EntityPolicy.NONE) ||
-            assert.failv('not none', [policy]));
+            assert.failv('not none', [ policy ]));
   });
   test('add user and change their policy', _ => {
     return AgentRoster.create(admin)
@@ -276,12 +277,38 @@ require(deps, function(require) {
 
   var ChatLog = require('chatlog').ChatLog;
 
-  test('create a chat log', _ => {
+
+  var createTestChatLog = _ => {
     return createTestUserRoster()
       .then(r => {
-        var chat = new ChatLog(r.roster, r.users.USER);
-        return chat;
+        return {
+          roster: r.roster,
+          agent: r.agents[0],
+          user: r.users[0],
+          chat: new ChatLog(r.roster, r.agents[0], r.users[0])
+        };
       });
+  };
+
+  test('create a chat log', _ => {
+    return createTestChatLog().then(r => r.chat);
+  });
+
+  test('rekey the chat', _ => {
+    return createTestChatLog()
+      .then(
+        r => r.chat.rekey()
+          .then(_ => assert.ok(r.chat._key))
+      );
+  });
+
+  test('send a message', _ => {
+    return createTestChatLog()
+      .then(
+        r => r.chat.rekey()
+          .then(_ => r.chat.send('hello'))
+          .then(_ => assert.ok(r.chat._key))
+      );
   });
 
   run_tests();

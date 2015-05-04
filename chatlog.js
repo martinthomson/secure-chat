@@ -6,6 +6,21 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
   var PublicEntity = require('entity').PublicEntity;
   var Entity = require('entity').Entity;
 
+  function encode16(v) {
+    console.log(v);
+    if (v !== (v & 0xffff)) {
+      throw new Error('not a suitable 16 bit number: ' + v);
+    }
+    var result = new Uint8Array(2);
+    result[0] = v >>> 8;
+    result[1] = v & 0xff;
+    return result;
+  }
+
+  function decode16(buf) {
+    return (buf[0] << 8) | buf[1];
+  }
+
   /** A chat key is a key that has been provided by the identified agent. */
   function ChatKey(agent, rawKey) {
     this.identity = agent.identity
@@ -31,15 +46,11 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
     },
 
     _nonceAndKey: function(sender, seqno) {
-      if (seqno !== (seqno & 0xffff)) {
-        throw new Error('bad seqno');
-      }
-      var counter = new Uint8Array(12);
-      counter[10] = seqno >>> 8;
-      counter[11] = seqno & 0xff;
+      console.log('nonceAndKey', sender, seqno);
+      var counter = util.bsConcat([ new Uint8Array(10), encode16(seqno) ]);
       return util.promiseDict({
         nonce: sender.identity
-          .then(id => hkdf(new Uint8Array(0), id, 'nonce', 12))
+          .then(id => hkdf(new Uint8Array(1), id, 'nonce', 12))
           .then(nonce => util.bsXor(nonce, counter)),
         key: this._key
       });
@@ -48,7 +59,7 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
   ChatKey.keyLength = 16;
   ChatKey.idLength = 16;
   ChatKey.generateKey = function() {
-    return crypto.getRandomValues(ChatKey.keyLength);
+    return crypto.getRandomValues(new Uint8Array(ChatKey.keyLength));
   };
 
   function ChatOpcode(op) {
@@ -142,7 +153,7 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
   };
 
   RekeyOperation._findOurEncryptedKey = function(parser, agentId, lengths) {
-    var count = (parser.next(1)[0] << 8) | (parser.next(1)[0]);
+    var count = decode16(parser.next(2));
     var pieceSize = lengths.identifier + ChatKey.keyLength;
     var found = util.bsDivide(parser.next(count * pieceSize), pieceSize)
         .map(piece => new util.Parser(piece))
@@ -204,45 +215,61 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
     this.message = message;
   }
   EncryptedOperation.prototype = util.mergeDict({
+    _encodeContent: function() {
+      var content = this.message;
+      if (typeof content === 'string') {
+        content = new TextEncoder('utf-8').encode(content);
+      }
+      if (content.byteLength > 0xffff) {
+        throw new Error('message is too long to encode');
+      }
+      return content;
+    },
+
     encode: function(key, seqno) {
-      return this._encodeParts()
-        .then(parts => {
-          var opcode = this.opcode.encode();
-          var ad = util.bsConcat([ opcode ]);
-          var message = util.bsConcat([ opcode ].concat(parts));
-          return this.actor.sign(message)
-            .then(sig => crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv,
-                                                 additionalData: ad },
-                                               key, util.bsConcat([message, sig])))
-            .then(enc => {
-              var len = new Uint8Array(1);
-              len[0] = enc.byteLength;
-              return util.bsConcat([len, enc]);
-            });
-        });
+      var content = this._encodeContent();
+      return Promise.all([
+        new Uint8Array(1), // TODO: use this somehow
+        content,
+        this.actor.sign(content) // TODO: discriminator
+      ]).then(cleartext => key.encrypt(this.actor, seqno,
+                                       util.bsConcat(cleartext)))
+        .then(encrypted => Promise.all([
+            this.opcode.encode(),
+            this.actor.identity,
+            key.identity,
+            encode16(seqno),
+            encode16(encrypted.byteLength),
+            encrypted
+        ])).then(util.bsConcat);
     }
   }, Object.create(ChatOperation.prototype));
-  EncryptedOperation.decode = function(parser, user, roster, key) {
+  EncryptedOperation.decode = function(parser, user, roster, keyLookup) {
   };
 
-  ChatOperation.decode = function(parser, user, roster, key) {
+  ChatOperation.decode = function(parser, user, roster, keyLookup) {
     var opcode = ChatOpcode.decode(parser);
     if (opcode.equals(ChatOpcode.KEY)) {
       return RekeyOperation.decode(parser, user, roster);
     }
     if (opcode.equals(ChatOpcode.ENCRYPTED)) {
-      return EncryptedOperation.decode(parser, user, roster, key);
+      return EncryptedOperation.decode(parser, user, roster, keyLookup);
     }
     throw new Error('invalid opcode ' + opcode);
   };
 
   /** A log of chat messages.  Note that unlike the roster, there is no strong
    * ordering of this log.  The log is only loosely ordered.
+   *
+   * @roster(UserRoster) the roster that this chat log covers
+   * @agent(Entity) the actor that will doing things
+   * @user(AgentRoster) the roster for that user (used for its identity only)
    */
-  function ChatLog(roster, user) {
+  function ChatLog(roster, agent, user) {
     this.log = [];
     this.roster = roster;
     this.identity = roster.identity;
+    this.agent = agent;
     this.user = user;
     this._keystore = {};
   }
@@ -262,39 +289,43 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
 
     rekey: function() {
       var rawKey = ChatKey.generateKey();
-      return this._addOperation(new RekeyOperation(this.user, rawKey,
-                                                   this.roster.members()))
-        .then(op => {
-          this._key = new ChatKey(this.user, rawKey);
-          this._seqno = 0;
-          return this._storeKey(this._key).then(_ => op);
-        });
+      return this._addOperation(new RekeyOperation(this.agent, this.user,
+                                                   rawKey,
+                                                   this.roster.members()));
     },
 
     send: function(message) {
-      return this._addOperation(new EncryptedOperation(this.user, message));
+      return this._addOperation(new EncryptedOperation(this.agent, message));
     },
 
-    _addOperation: function(op) {
-      op.encode(this._key, this._seqno++)
-        .then(encoded => {
-          this.log.push(encoded);
-          return encoded;
-        });
+    _updateKey: function(rawKey) {
+      var k = new ChatKey(this.agent, rawKey);
+      this._key = k;
+      this._seqno = 0;
+      return k.identity
+        .then(id => this._keystore[util.base64url.encode(id)] = k);
+    },
+
+    _addOperation: function(op, encoded) {
+      return util.promiseDict({
+        logEntry: encoded || op.encode(this._key, this._seqno++),
+        keyUpdate: op.opcode.equals(ChatOpcode.KEY) && this._updateKey(op.key)
+      }).then(r => {
+        this.log.push(r.logEntry);
+        return r.logEntry;
+      });
     },
 
     _decodeAndAdd: function(parser) {
       var startPosition = parser.mark();
       return PublicIdentity.lengths.then(
-        lengths => ChatOperation.decode()
-          .then({
+        lengths => ChatOperation.decode(parser, this.agent, this.roster,
+                                        id => this._getKey(id))
+          .then(op => {
+            var encoded = parser.marked(startPosition);
+            return this._addOperation(op, encoded);
           })
       );
-    },
-
-    _storeKey: function(k) {
-      return k.identifier
-        .then(id => this._keystore[util.base64url.encode(id)] = k);
     },
 
     _getKey: function(kid) {
