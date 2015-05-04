@@ -84,20 +84,21 @@ define(['require', 'util', 'entity', 'policy'], function(require) {
    * permitted. The actor is used to provide the signing public key; the actor
    * also needs to be a member on the roster. */
   function RosterChangeOperation(actor, actorRoster, subject, policy) {
-    ChangeOperation.call(this, RosterOpcode.CHANGE_ROSTER,
-                         actor, subject, policy);
+    RosterOperation.call(this, RosterOpcode.CHANGE_ROSTER,
+                         actor, subject);
     this.actorRoster = actorRoster;
+    this.policy = policy;
   }
   RosterChangeOperation.prototype = util.mergeDict({
     _encodeParts: function() {
-      var base = ChangeOperation.prototype._encodeParts.call(this);
+      var base = [this.subject.identity, this.policy.encode() ];
       if (this.actorRoster) {
         return base.concat([ this.actorRoster.identity ]);
       }
       return base.concat([ this.actor.identity
                            .then(id => new Uint8Array(id.byteLength)) ]);
     }
-  }, Object.create(ChangeOperation.prototype));
+  }, Object.create(RosterOperation.prototype));
 
 
   RosterOperation.decode = function(parser, lengths, allRosters) {

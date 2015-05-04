@@ -1,4 +1,49 @@
-define(['require'], function(require) {
+define(['require', 'roster', 'hkdf', 'util'], function(require) {
+
+  var Roster = require('roster');
+  var hkdf = require('hkdf');
+  var util = require('util');
+
+  /** A chat key is a key that has been provided by keyAgent. */
+  function ChatKey(agent, rawKey) {
+    this.identifier = agent.identifier
+      .then(id => hkdf(id, rawKey, 'keyid', 16));
+    this._key = crypto.subtle.importKey('raw', rawKey, 'AES-GCM', false,
+                                        [ 'encrypt', 'decrypt' ]);
+  }
+  ChatKey.prototype = {
+    encrypt: function(sender, seqno, buf) {
+      return this._nonceAndKey(sender, seqno)
+        .then(r => crypto.subtle.encrypt({
+          name: 'AES-GCM',
+          iv: r.nonce
+        }, r.key, buf));
+    },
+
+    decrypt: function(sender, seqno, buf) {
+      return this._nonceAndKey(sender, seqno)
+        .then(r => crypto.subtle.decrypt({
+          name: 'AES-GCM',
+          iv: r.nonce
+        }, r.key, buf));
+    },
+
+    _nonceAndKey: function(sender, seqno) {
+      if (seqno !== (seqno & 0xffff)) {
+        throw new Error('bad seqno');
+      }
+      var counter = new Uint8Array(12);
+      counter[10] = seqno >>> 8;
+      counter[11] = seqno & 0xff;
+      return util.promiseDict({
+        nonce: sender.identity
+          .then(id => hkdf(counter, id, 'nonce', 12))
+          .then(nonce => util.bsXor(nonce, counter));
+        key: this._key
+      });
+    }
+  };
+
   function ChatOpcode(op) {
     this.opcode = op;
   }
@@ -30,27 +75,41 @@ define(['require'], function(require) {
     },
   };
 
-  function RekeyOperation(actor, key, members) {
+  function RekeyOperation(actor, actorRoster, key, members) {
     ChatOperation.call(this, ChatOpcode.REKEY, actor);
+    this.actorRoster = actorRoster;
     this.key = key;
     this.members = members || [];
   }
   RekeyOperation.prototype = util.mergeDict({
     _encipherKey: function() {
-      return Promise.all(this.members.map(
+      return this.members.map(
         member => Promise.all([
           member.identity,
           this.actor.maskKey(member.share, this.key)
-        ]).then(parts => util.bsConcat(parts))
-      ))
+        ]).then(util.bsConcat)
+      );
     },
+
     encode: function() {
-      var len = new Uint16Array(1);
-      len[0] = this.parts.reduce((total, part) => total + part.byteLength, 0);
-      return Promise.resolve(util.bsConcat(
-        [ this.opcode.encode(), len, this.actor.identity ]
-          .concat(this._encipherKey())
-      ));
+      if (this.members.length > 0xffff) {
+        throw new Error('too many members');
+      }
+      var count = new Uint8Array(2);
+      count[0] = this.members.length >>> 8;
+      count[1] = this.members.length & 0xff;
+      var pieces = [
+          this.opcode.encode(),
+          this.actor.identity,
+          this.actorRoster.identity,
+          count
+      ].concat(this._encipherKey());
+      return Promise.all(pieces)
+        .then(encodedPieces => {
+          var msg = util.bsConcat(encodedPieces);
+          return this.actor.sign(msg)
+            .then(sig => util.bsConcat([ msg, sig ]));
+        });
     }
   }, Object.create(ChatOperation.prototype));
 
@@ -59,29 +118,69 @@ define(['require'], function(require) {
     return crypto.getRandomValues(RekeyOperation.keyLength);
   }
 
-  RekeyOperation.decode = function(user, roster, parser) {
-    return user.identity.then(id => {
-      var len = new Uint16Array(parser.next(2))[0];
-      var end = parser.position + len;
+  /** Finds the given peer agent and user.  Checks that peerUser is a member of
+   * the userRoster, and that peerAgent is a member of the roster corresponding
+   * to peerUser. */
+  RekeyOperation._findActor = function(userRoster, peerAgent, peerUser) {
+    var isAllowed = r => {
+      if (!r) {
+        throw new Error('user not permitted to rekey');
+      }
+      return r;
+    };
+    return Roster.findRoster(peerUser).then(
+      peerRoster => util.promiseDict({
+        validUser: userRoster.find(peerRoster)
+          .then(isAllowed),
+        actor: peerRoster.find(peerAgent)
+          .then(isAllowed)
+      }).then(r => {
+        return {
+          actor: r.actor,
+          actorRoster: peerRoster
+        };
+      })
+    );
+  };
 
-      // Determine who sent this.
-      var peer = new PublicIdentity(parser.next(id.byteLength));
-      // Find the key that was sent to us.
-      var encrypted;
-      while (parser.position < end) {
-        var otherid = parser.next(id.byteLength);
-        encrypted = parser.next(RekeyOperation.keyLength);
-        if (util.bsEqual(id, otherid)) {
-          parser.position = end;
-        }
+  RekeyOperation.decode = function(agent, userRoster, parser) {
+    return util.promiseDict({
+      lengths: PublicEntity.lengths,
+      agentId: agent.identity
+    }).then(r => {
+      var lengths = r.lengths;
+      var agentId = r.agentId;
+
+      // Who sent this?
+      var peerAgent = new PublicIdentity(parser.next(lengths.identifier));
+      var peerUser = new PublicIdentity(parser.next(lengths.identifier));
+
+      var count = (parser.next(1)[0] << 8) | (parser.next(1)[0]);
+      var pieceSize = lengths.identifier + RekeyOperation.keyLength;
+      var found = util.bsDivide(parser.next(count * pieceSize), pieceSize)
+        .map(piece => new util.Parser(piece))
+        .find(pieceParser => util.bsEqual(agentId,
+                                          pieceParser.next(lengths.identifier)));
+      var rawKey;
+      if (found) {
+        rawKey = found.next(RekeyOperation.keyLength);
       }
-      if (encrypted) {
-        return roster.find(peer)
-          .then(realPeer => user.maskKey(realPeer.share, encrypted))
-          .then(key => new RekeyOperation(user, key, []));
-      }
-      return Promise.resolve(new RekeyOperation(user, null, []));
-    });
+      var msg = parser.marked(start);
+      var sig = parser.next(lengths.signature);
+      return util.promiseDict({
+        signature: peerAgent.verify(sig, msg)
+          .then(ok => {
+            if (!ok) {
+              throw new Error('signature on rekey invalid');
+            }
+          }),
+        op: RekeyOperation._findActor(userRoster, peerAgent, peerUser)
+          .then(
+            r => agent.maskKey(r.actor.share, encrypted)
+              .then(key => new RekeyOperation(r.actor, r.actorRoster, rawKey, []))
+          )
+      });
+    }).then(r => r.op);
   };
 
   function MessageOperation(actor, message) {
@@ -99,14 +198,14 @@ define(['require'], function(require) {
       return this._encodeParts()
         .then(parts => {
           var opcode = this.opcode.encode();
-          var ad = util.bsConcat([opcode]);
-          var message = util.bsConcat([opcode].concat(parts));
+          var ad = util.bsConcat([ opcode ]);
+          var message = util.bsConcat([ opcode ].concat(parts));
           return this.actor.sign(message)
             .then(sig => crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv,
                                                  additionalData: ad },
                                                key, util.bsConcat([message, sig])))
             .then(enc => {
-              var len = new Uint16Array(1);
+              var len = new Uint8Array(1);
               len[0] = enc.byteLength;
               return util.bsConcat([len, enc]);
             });

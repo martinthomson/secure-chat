@@ -75,7 +75,8 @@ define(reqs, function(require) {
         return this._checkRosterChange(entry.actor, entry.actorRoster,
                                        entry.subject, entry.policy);
       }
-      return Promise.reject(new Error('invalid opcode for user roster'));
+      return Promise.reject(new Error('invalid opcode for user roster: ' +
+                                      entry.opcode));
     }
   }, Object.create(Roster.prototype));
 

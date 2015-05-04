@@ -1,4 +1,4 @@
-define([util], function(util) {
+define(['util'], function(util) {
   var HMAC_SHA256 = { name: 'HMAC', hash: 'SHA-256' };
   function hmac(key) {
     this.keyPromise = crypto.subtle.importKey('raw', key, HMAC_SHA256,

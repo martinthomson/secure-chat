@@ -33,6 +33,15 @@ define([], function() {
       .join(sep || '');
   }
 
+  function bsXor(a, b) {
+    if (a.byteLength !== b.byteLength) {
+      throw new Error('bsXor args must be the same length');
+    }
+    a = new Uint8Array(a);
+    b = new Uint8Array(b);
+    return a.map((av, i) => av ^ b[i]);
+  }
+
   /** A simple helper for splitting a BufferSource into pieces. */
   function Parser(buf) {
     this.position = buf.byteOffset || 0;
@@ -44,8 +53,11 @@ define([], function() {
       this.position += len;
       return chunk;
     },
-    range: function(start, end) {
-      return new Uint8Array(this._buf, start, end - start);
+    mark: function() {
+      return this.position;
+    },
+    marked: function(m) {
+      return new Uint8Array(this._buf, m, this.position - m);
     },
     get remaining() {
       return this._buf.byteLength - this.position;
@@ -139,15 +151,6 @@ define([], function() {
     comparator = comparator || ((x,y) => x === y);
     return a.length === b.length &&
       a.every(ae => b.some(be => comparator(ae, be)));
-  }
-
-  function xor(a, b) {
-    if (a.byteLength !== b.byteLength) {
-      throw new Error('bsXor args must be the same length');
-    }
-    a = new Uint8Array(a);
-    b = new Uint8Array(b);
-    return a.map((av, i) => av ^ b[i]);
   }
 
 

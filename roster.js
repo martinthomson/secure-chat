@@ -202,17 +202,17 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
      * if the entry isn't valid.
      */
     _decodeAndAdd: function(parser) {
-      var startPosition = parser.position;
+      var startPosition = parser.mark();
       return itemLengths.then(
         lengths => RosterOperation.decode(parser, lengths, Roster._allRosters)
           .then(op => {
             var hash = parser.next(lengths.hash);
-            var signedMessage = parser.range(startPosition, parser.position);
+            var signedMessage = parser.marked(startPosition);
             var signature = parser.next(lengths.signature);
 
             return this._checkHashAndSig(op.actor, hash, signedMessage, signature)
               .then(_ => {
-                var encoded = parser.range(startPosition, parser.position);
+                var encoded = parser.marked(startPosition);
                 return this._addEntry(op, encoded);
               });
           })
@@ -254,6 +254,9 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
     }
   };
   Roster._allRosters = new AllRosters();
+  Roster.findRoster = function(entity) {
+    return Roster._allRosters.lookup(id);
+  };
 
   return Roster;
 });
