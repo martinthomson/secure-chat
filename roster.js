@@ -78,12 +78,6 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       return this.find(entity).then(v => v ? v.policy : EntityPolicy.NONE);
     },
 
-    /** Returns an array of all the active members in the roster.  That is,
-     * all those that have provided shares. */
-    members: function() {
-      throw new Error('members not implemented on base roster');
-    },
-
     encode: function() {
       return util.bsConcat(this.log);
     },
@@ -142,6 +136,8 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       return this._canChange(actor, subject, proposed)
         .then(ok => {
           if (!ok) {
+            cacheKey(actor).then(k => console.log('actor', k));
+            cacheKey(subject).then(k => console.log('subject', k));
             throw new Error('change forbidden');
           }
         });

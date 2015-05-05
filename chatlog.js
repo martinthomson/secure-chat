@@ -312,7 +312,14 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
     this.log = []; // encoded
     this.messages = []; // decoded
     this.roster = roster;
-    this.identity = roster.identity;
+    // The chat log is identified by the roster primarily.  But we sometimes
+    // want to host multiple chats for different users in the same context, even
+    // if that is only for testing purposes.  A unique identifier seems
+    // reasonable.  To that end, the chat identity combines the identity of the
+    // user with the identity of the roster.
+    this.identity = Promise.all([
+      roster.identity, agent.identity
+    ]).then(a => util.bsXor(a[0], a[1]));
     this.agent = agent;
     this.user = user;
     this._keystore = {};
@@ -338,7 +345,7 @@ define(['require', 'roster', 'hkdf', 'util'], function(require) {
       var rawKey = ChatKey.generateKey();
       return this._addOperation(new RekeyOperation(this.agent, this.user,
                                                    rawKey,
-                                                   this.roster.members()));
+                                                   this.roster.agents()));
     },
 
     send: function(message) {

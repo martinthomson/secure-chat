@@ -204,8 +204,8 @@ require(deps, function(require) {
 
   test('get all shares', _ => {
     return createTestAgentRoster().then(result => util.promiseDict({
-      stored: Promise.all(result.roster.members()
-                          .map(member => member.encodeShare())),
+      stored: Promise.all(result.roster.agents()
+                          .map(agent => agent.encodeShare())),
       expected: Promise.all(
         [ admin ].concat(
           Object.keys(result.agents)
@@ -254,8 +254,8 @@ require(deps, function(require) {
     return createTestUserRoster()
       .then(r => util.promiseDict({
         rosterShares:  Promise.all(
-          r.roster.members()
-            .map(member => member.encodeShare())
+          r.roster.agents()
+            .map(agent => agent.encodeShare())
         ),
 
         expectedShares: Promise.all(

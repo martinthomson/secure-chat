@@ -23,7 +23,7 @@ define(['require', 'util', 'hkdf'], function(require) {
       if (pubKey instanceof CryptoKey) {
         return pubKey;
       }
-      return c.importKey('spki', util.bsConcat([SPKI_PREFIX, pubKey]),
+      return c.importKey('spki', util.bsConcat([ SPKI_PREFIX, pubKey ]),
                          alg, true, usages);
     });
   }
@@ -36,7 +36,7 @@ define(['require', 'util', 'hkdf'], function(require) {
    * take an BufferSource, a CryptoKey or a promise for either.
    */
   function PublicEntity(sig, ecdh) {
-    this.signPublic = importPublicKey(sig, ECDSA_KEY, ['verify']);
+    this.signPublic = importPublicKey(sig, ECDSA_KEY, [ 'verify' ]);
     if (ecdh) {
       this.share = ecdh;
     }
@@ -63,7 +63,7 @@ define(['require', 'util', 'hkdf'], function(require) {
     },
 
     set share(pub) {
-      this.ecdhPublic = importPublicKey(pub, ECDH, ['deriveBits']);
+      this.ecdhPublic = importPublicKey(pub, ECDH, [ 'deriveBits' ]);
     },
 
     encodeShare: function() {
@@ -79,8 +79,8 @@ define(['require', 'util', 'hkdf'], function(require) {
   /** An entity has all the private keying material.  It is duck-typed into
    * PublicEntity so that it can be used to share information. */
   function Entity() {
-    this.signKey = c.generateKey(ECDSA_KEY, false, ['sign', 'verify']);
-    this.ecdhKey = c.generateKey(ECDH, false, ['deriveBits']);
+    this.signKey = c.generateKey(ECDSA_KEY, false, [ 'sign', 'verify' ]);
+    this.ecdhKey = c.generateKey(ECDH, false, [ 'deriveBits' ]);
   }
   Entity.prototype = {
     verify: function(signature, message) {
@@ -108,7 +108,7 @@ define(['require', 'util', 'hkdf'], function(require) {
     /** This shouldn't be necessary, since objects of type Entity behave exactly
      * like the value that this returns. */
     get publicEntity() {
-      return Promise.all([this.signKey, this.ecdhKey])
+      return Promise.all([ this.signKey, this.ecdhKey ])
         .then(keys => new PublicEntity(keys[0].publicKey, keys[1].publicKey));
     },
 

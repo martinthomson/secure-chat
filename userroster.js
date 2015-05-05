@@ -29,11 +29,17 @@ define(reqs, function(require) {
                                                       subject, policy));
     },
 
-    /** Traverse all the rosters that this roster includes as members.  This
-     * then finds the members on each of these and joins them together. */
-    members: function() {
+    /** Returns all the user rosters that are a member of this roster. */
+    users: function() {
       return Object.keys(this._cache)
-        .map(k => this._cache[k].roster.members())
+        .map(k => this._cache[k].roster);
+    },
+
+    /** Returns all the agents that are part of this roster.  This traverses all
+     * the rosters that this roster includes as a member to retrieve this
+     * information. */
+    agents: function() {
+      return this.users().map(r => r.agents())
         .reduce((all, member) => all.concat(member), []);
     },
 

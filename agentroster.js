@@ -46,7 +46,7 @@ define(reqs, function(require) {
      * those that have provided shares.  Since this is a terminal roster (all
      * members are expected to offer shares), this is just the set of
      * members.  */
-    members: function() {
+    agents: function() {
       return Object.keys(this._cache)
         .map(k => this._cache[k])
         .filter(e => !!e.share);
