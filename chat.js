@@ -152,6 +152,7 @@ require(reqs, function(require) {
     var id = 'chat-' + parent.id;
     var el = makeElement('span', id);
     el.className = 'inchat';
+    el.title = 'this is being used for the currently selected chat';
     parent.appendChild(el);
   };
 
