@@ -16,7 +16,7 @@ seqno(2) = a counter maintained by the sender
 encrypted[2] { -- i.e., a buffer with a length encoded on 2 bytes
   opcode(1) -- internal opcode: 0 = text, 1 = identity assertion
   message
-  signature over message
+  signature over internal message
 }
 
 The nonce for this message is derived from the senderId:
@@ -33,7 +33,7 @@ repeated[2] { -- i.e., repeated with a count that is encoded on a length of 2
   peerId = public key of peer
   encipheredKey(16) = key XOR hkdf([], DH(sender, peer), 'key', 16)
 }
-signature over message
+signature over whole message (opcode forward)
 
 Note: one consequence of this scheme is that it's not possible to reshare the
 same key - any attempt to reshare a key will result in a new identifier for that

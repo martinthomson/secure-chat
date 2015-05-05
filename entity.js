@@ -126,7 +126,6 @@ define(['require', 'util', 'hkdf'], function(require) {
     /** Enciphers a key using the remote share. Or deciphers an encrypted key in
      * the same way. XOR FTW. */
     maskKey: function(share, key) {
-      console.log('maskKey', this, share, key);
       return util.promiseDict({
         priv: this.ecdhKey,
         pub: Promise.resolve(share)

@@ -256,7 +256,7 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
   };
   Roster._allRosters = new AllRosters();
   Roster.findRoster = function(entity) {
-    return Roster._allRosters.lookup(id);
+    return Roster._allRosters.lookup(entity);
   };
 
   return Roster;

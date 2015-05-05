@@ -281,12 +281,11 @@ require(deps, function(require) {
   var createTestChatLog = _ => {
     return createTestUserRoster()
       .then(r => {
-        return {
-          roster: r.roster,
+        return util.mergeDict({
           agent: r.agents[0],
           user: r.users[0],
           chat: new ChatLog(r.roster, r.agents[0], r.users[0])
-        };
+        }, r);
       });
   };
 
@@ -308,6 +307,25 @@ require(deps, function(require) {
         r => r.chat.rekey()
           .then(_ => r.chat.send('hello'))
           .then(_ => assert.ok(r.chat._key))
+      );
+  });
+
+  test('encode and decode chat log', _ => {
+    var message = 'This is the end';
+    var last = a => a[a.length - 1];
+    return createTestChatLog()
+      .then(
+        r => r.chat.rekey()
+          .then(_ => r.chat.send(message))
+          .then(_ => r.chat.encode())
+          .then(encoded => {
+            var chat = new ChatLog(r.roster, last(r.agents), last(r.users));
+            return chat.decode(encoded)
+              .then(_ => {
+                var msgBytes = new TextEncoder('utf-8').encode(message);
+                return assert.memcmp(chat.messages[0].message, msgBytes);
+              });
+          })
       );
   });
 
