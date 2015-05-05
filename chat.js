@@ -169,6 +169,7 @@ require(reqs, function(require) {
     var id = 'log-' + parent.id;
     var el = makeElement('span', id);
     el.className = 'rawlog';
+    el.title = 'show the raw contents of the log';
     el.textContent = '\ud83d\udcdd';
     click(id, _ => {
       elements.rawlog.value = base64.encode(obj.encode());
