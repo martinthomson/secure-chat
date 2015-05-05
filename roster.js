@@ -136,8 +136,6 @@ define(['require', 'util', 'entity', 'policy', 'rosterop'], function(require) {
       return this._canChange(actor, subject, proposed)
         .then(ok => {
           if (!ok) {
-            cacheKey(actor).then(k => console.log('actor', k));
-            cacheKey(subject).then(k => console.log('subject', k));
             throw new Error('change forbidden');
           }
         });

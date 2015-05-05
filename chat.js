@@ -1,5 +1,5 @@
 var reqs = ['require', 'userroster', 'agentroster', 'entity',
-            'util', 'policy', 'chatlog'];
+            'util', 'policy', 'chatlog', 'hkdf'];
 require(reqs, function(require) {
   var util = require('util');
   var Entity = require('entity').Entity;
@@ -9,6 +9,7 @@ require(reqs, function(require) {
   var UserRoster = require('userroster');
   var ChatLog = require('chatlog').ChatLog;
   var base64 = util.base64url;
+  var hkdf = require('hkdf');
 
   var objects = {
     chat: {},
@@ -46,7 +47,7 @@ require(reqs, function(require) {
     'userlist', 'createuser',
     'grouplist', 'creategroup',
     'chatlist', 'createchat', 'rekeychat',
-    'message', 'messagesend', 'log'
+    'message', 'messagesend', 'log', 'rawlog'
   ].reduce((all, id) => {
     all[id] = document.getElementById(id);
     return all;
@@ -73,31 +74,42 @@ require(reqs, function(require) {
     elements[id] = e;
     return e;
   };
-  var make = (obj, type, makeactive) => {
-    return obj.identity.then(id => {
-      id = base64.encode(id);
 
+  var shortId = obj =>
+      obj.identity
+      .then(id => hkdf(new Uint8Array(1), id, 'shortid', 6))
+      .then(id => base64.encode(id));
+
+  var make = (obj, type, onActivate) => {
+    return shortId(obj).then(id => {
       var div = makeElement('div', id);
       var span = makeElement('span', 'name-' + id);
       span.className = 'identifier';
       span.textContent = id;
       div.appendChild(span);
-      elements[type + 'list'].appendChild(div);
 
-      objects[type][id] = obj;
+      var act = makeElement('span', 'active-' + id);
+      act.title = 'this ' + type + ' is selected as the actor' +
+        ' for changes to other objects';
+      div.appendChild(act);
 
       var select = _ => {
         var oldid = active[type + 'id'];
         if (oldid) {
           elements[oldid].classList.remove('active');
+          elements['active-' + oldid].textContent = '';
         }
         div.classList.add('active');
+        act.textContent = '\u270a';
+
         active[type + 'id'] = id;
-        return makeactive(obj);
+        return onActivate(obj);
       };
       select();
 
       click('name-' + id, select);
+      objects[type][id] = obj;
+      elements[type + 'list'].appendChild(div);
       return div;
     });
   };
@@ -108,15 +120,16 @@ require(reqs, function(require) {
       .map(k => 'member-' + k)
       .forEach(k => elements[k].textContent = NO);
 
-    return Promise.all(members.map(agent => agent.identity))
-      .then(agentids => agentids.map(aid => 'member-' + base64.encode(aid)))
-      .then(agentids => agentids.forEach(aid => elements[aid].textContent = YES));
+    return Promise.all(members.map(agent => shortId(agent)))
+      .then(agentids => agentids
+            .forEach(aid => elements['member-' + aid].textContent = YES));
   };
 
   var makeMemberElement = (parent, setPolicyFunc) => {
     var id = 'member-' + parent.id;
     var memberElement = makeElement('span', id);
     memberElement.className = 'member';
+    memberElement.title = 'indicates if this is part of the active roster';
     memberElement.textContent = NO;
     click(id, e => {
       var isMember = memberElement.textContent === YES;
@@ -135,12 +148,42 @@ require(reqs, function(require) {
     }
   };
 
+  var makeInChatElement = parent => {
+    var id = 'chat-' + parent.id;
+    var el = makeElement('span', id);
+    el.className = 'inchat';
+    parent.appendChild(el);
+  };
+
+  var markInChat = (completeCollection, active) => {
+    Object.keys(completeCollection)
+      .map(k => 'chat-' + k)
+      .forEach(k => elements[k].textContent = '');
+
+    return shortId(active)
+      .then(id => elements['chat-' + id].textContent = '\ud83d\ude2e');
+  };
+
+  var makeLogElement = (obj, parent) =>  {
+    var id = 'log-' + parent.id;
+    var el = makeElement('span', id);
+    el.className = 'rawlog';
+    el.textContent = '\ud83d\udcdd';
+    click(id, _ => {
+      elements.rawlog.value = base64.encode(obj.encode());
+    });
+    parent.appendChild(el);
+  };
+
   click('createagent', _ => {
     var agent = new Entity();
     return make(agent, 'agent', _ => {})
-      .then(el => makeMemberElement(el, policy => {
-        return active.user.change(active.agent, agent, policy);
-      }));
+      .then(el => {
+        makeInChatElement(el);
+        return makeMemberElement(el, policy => {
+          return active.user.change(active.agent, agent, policy);
+        });
+      });
   });
 
   click('createuser', _ => {
@@ -148,34 +191,64 @@ require(reqs, function(require) {
       .then(roster => {
         return make(roster, 'user', _ => {
           return markMembers(objects.agent, roster.agents());
-        }).then(el => makeMemberElement(el, policy => {
-          return active.group.change(active.agent, active.user, roster, policy);
-        }))
+        }).then(el => {
+          makeInChatElement(el);
+          makeLogElement(roster, el);
+          return makeMemberElement(el, policy => {
+            return active.group.change(active.agent, active.user,
+                                       roster, policy);
+          });
+        })
       });
   });
 
   click('creategroup', _ => {
     activeAgentIsMember();
     return UserRoster.create(active.user)
-      .then(roster => make(roster, 'group', _ => {
-        return markMembers(objects.user, roster.users());
-      }));
+      .then(roster => {
+        return make(roster, 'group', _ => {
+          return markMembers(objects.user, roster.users());
+        }).then(el => {
+          makeInChatElement(el);
+          makeLogElement(roster, el);
+        })
+      });
   });
 
-  var appendMessage = msg => {
-    var el = document.createElement('div');
-    el.className = 'message';
-    el.textContent = msg;
-    elements.log.appendChild(el);
+  var appendMessage = (sender, msg) => {
+    return shortId(sender).then(id => {
+      var el = document.createElement('div');
+
+      var senderElement = document.createElement('span');
+      senderElement.className = 'sender';
+      senderElement.textContent = id;
+      el.appendChild(senderElement);
+
+      var messageElement = document.createElement('span');
+      messageElement.className = 'message';
+      messageElement.textContent = msg;
+      el.appendChild(messageElement);
+
+      elements.log.appendChild(el);
+    });
   };
 
   click('createchat', _ => {
     activeAgentIsMember();
-    var chat = new ChatLog(active.group, active.agent, active.user);
+    var group = active.group;
+    var agent = active.agent;
+    var user = active.user;
+    var chat = new ChatLog(group, agent, user);
     return make(chat, 'chat', _ => {
       elements.log.innerHTML = '';
-      return chat.messages.forEach(op => appendMessage(op.actor, op.message));
-    });
+      return Promise.all(
+        [
+          markInChat(objects.agent, agent),
+          markInChat(objects.user, user),
+          markInChat(objects.group, group)
+        ].concat(chat.messages.map(op => appendMessage(op.user, op.text)))
+      );
+    }).then(el => makeLogElement(chat, el));
   });
 
   click('rekeychat', _ => {
@@ -184,6 +257,6 @@ require(reqs, function(require) {
 
   click('messagesend', _ => {
     return active.chat.send(elements.message.value)
-      .then(_ => appendMessage(active.agent, elements.message.value));
+      .then(_ => appendMessage(active.chat.user, elements.message.value));
   });
 });

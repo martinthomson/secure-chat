@@ -29,6 +29,11 @@ define(reqs, function(require) {
                                                       subject, policy));
     },
 
+    /** Returns the cached roster for the given entity. */
+    findUser: function(entity) {
+      return this.find(entity).then(entry => entry ? entry.roster : null);
+    },
+
     /** Returns all the user rosters that are a member of this roster. */
     users: function() {
       return Object.keys(this._cache)

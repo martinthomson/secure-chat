@@ -11,9 +11,9 @@
       span { padding: 0 5px; }
       textarea { width: 300px; height: 400px; font-size: 95%; }
       .identifier { display: inline-block; max-width: 50; cursor: pointer; }
-      .member { cursor: pointer; }
+      .sender::after { content: ">  "; }
+      .member, .rawlog { cursor: pointer; }
       .active { background-color: rgba(99, 215, 19, 0.4); }
-      .active::before { content: "✊ "; }
     </style>
   </head>
   <body>
@@ -64,6 +64,11 @@
         <input id="message" type="text">
         <button id="messagesend">Send</button>
       </div>
+    </div>
+
+    <div>
+      <h2>Raw Log</h2>
+      <textarea id="rawlog"></textarea>
     </div>
   </body>
 </html>
